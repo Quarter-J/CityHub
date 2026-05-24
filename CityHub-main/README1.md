@@ -6,6 +6,7 @@
     <img src="https://img.shields.io/badge/Redis-7.0-red" alt="Redis">
     <img src="https://img.shields.io/badge/Java-1.8-blue" alt="Java">
     <img src="https://img.shields.io/badge/Redisson-3.13-brightgreen" alt="Redisson">
+    <img src="https://img.shields.io/badge/Caffeine-2.9.3-blue" alt="Caffeine">
     <img src="https://img.shields.io/badge/MyBatis--Plus-3.4-purple" alt="MyBatis-Plus">
     <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
   </p>
@@ -61,7 +62,7 @@
 
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
-| 查询商铺详情 | `GET` | `/shop/{id}` | 查询商铺信息（二级缓存：Redis → DB，逻辑过期防击穿） |
+| 查询商铺详情 | `GET` | `/shop/{id}` | 查询商铺信息（两级缓存：Caffeine → Redis → DB，逻辑过期防击穿） |
 | 新增商铺 | `POST` | `/shop` | 添加新商铺 |
 | 更新商铺 | `PUT` | `/shop` | 修改商铺信息，并更新缓存 |
 | 按类型查询 | `GET` | `/shop/of/type` | 按类型分页查询，支持 GEO 距离排序 |
@@ -122,7 +123,7 @@
 | **ORM** | MyBatis-Plus 3.4 | 数据持久化，简化 CRUD |
 | **关系型数据库** | MySQL 8.0 | 核心业务数据存储 |
 | **分布式缓存** | Redis 7.0 | 高性能缓存、分布式锁、限流 |
-| **本地缓存** | Caffeine 3.1（规划中，尚未实现） | 进程内一级缓存，减少 Redis 压力 |
+| **本地缓存** | Caffeine 2.9.3 | 进程内 L1 缓存，减少 Redis 压力 |
 | **分布式锁** | Redisson 3.13 | 分布式锁实现 |
 | **消息队列** | RabbitMQ | 秒杀异步下单，削峰填谷 |
 | **工具库** | Hutool 5.7 | 通用工具类 |
@@ -130,16 +131,18 @@
 
 ### 架构亮点
 
-#### 🔥 热点缓存 — 二级缓存架构（Caffeine 本地缓存为规划中）
+#### 🔥 热点缓存 — 两级缓存架构
 
 ```
-请求 → Redis(分布式) → MySQL(数据库)
-       TTL 30s（逻辑过期，不设物理 TTL）
+请求 → Caffeine(本地 L1) → Redis(分布式 L2) → MySQL(数据库)
+       TTL 5min              TTL 30min
 ```
 
+- **L1 本地缓存**：Caffeine 缓存热点数据，纳秒级响应，容量上限 1000 条，写入后 5 分钟过期
+- **L2 分布式缓存**：Redis 缓存，逻辑过期方案防击穿
 - **缓存击穿**：采用**逻辑过期方案**（不设物理 TTL，后台异步刷新），优先保证可用性
-- **缓存穿透**：采用**缓存空值方案**，搭配短 TTL 避免内存浪费
-- **热点优化**（规划中）：对秒杀详情页等超热点数据，可引入 Caffeine 本地缓存扛流量，降低 Redis 压力
+- **缓存穿透**：采用**缓存空值方案**，Redis 和 Caffeine 均回填空值标记，搭配短 TTL 避免内存浪费
+- **缓存更新**：数据变更时通过 `invalidateTwoLevel` 同步清除 L1 和 L2 缓存，缩短不一致窗口
 
 #### ⚡ 高并发秒杀系统
 
