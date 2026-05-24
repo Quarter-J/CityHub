@@ -5,6 +5,7 @@
     <img src="https://img.shields.io/badge/RabbitMQ-3.x-orange" alt="RabbitMQ">
     <img src="https://img.shields.io/badge/Redis-7.0-red" alt="Redis">
     <img src="https://img.shields.io/badge/Redisson-3.13-brightgreen" alt="Redisson">
+    <img src="https://img.shields.io/badge/Caffeine-2.9.3-blue" alt="Caffeine">
     <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
   </p>
 </div>
@@ -66,31 +67,30 @@
 
 ---
 
-### 使用 Caffeine 本地缓存和 Redis 缓存搭建二级缓存架构（规划中）
-
-> **注**：当前代码仅实现了 Redis → MySQL 的二级缓存，Caffeine 本地缓存尚未引入 pom.xml，以下为设计规划。
+### 使用 Caffeine 本地缓存和 Redis 缓存搭建二级缓存架构
 
 对于一些存储在 Redis 中的过热的 key，例如秒杀优惠券的详情页，它本身是更新频率极低的，访问频率很高的数据。而 Redis 单实例性能有上限，单个 Redis 的压力过大，Redis 可能成为系统瓶颈。
 
-对于”秒杀优惠券详情”这种更新频率极低、访问频率极高的数据，可以引入 Caffeine 作为进程本地缓存。请求进来先查本地内存，没有再查 Redis，最后才查数据库。
+对于”秒杀优惠券详情”这种更新频率极低、访问频率极高的数据，我引入了 Caffeine 作为 L1 进程本地缓存，Redis 作为 L2 缓存，构建了 **Caffeine → Redis → MySQL** 的两级缓存架构。
 
-这里有个数据一致性的坑：如果是集群部署，数据库改了，怎么通知所有机器清理本地缓存？引入 Redis 广播又太复杂了。
+**实现细节：**
 
-我想通了一个点：既然是秒杀详情页，短暂的不一致是可以容忍的。所以我给本地缓存设置了极短的 TTL（比如 5 秒）。只靠 TTL 来自动刷新，代码简单，效果也足够好。
+* `CaffeineConfig`：配置 Caffeine 缓存 Bean，初始容量 128，最大容量 1000，写入后 5 分钟过期。
+* `CacheClient`：封装了两级缓存的核心查询逻辑，支持缓存穿透模式（`queryTwoLevel`）和逻辑过期模式（`queryTwoLevelWithLogicalExpire`），以及缓存失效方法（`invalidateTwoLevel`）。
+* `ShopServiceImpl`：商铺查询已接入两级缓存，更新商铺时同步清除 L1 和 L2 缓存。
 
-**引入 Caffeine 后，用户的请求流程将会是：**
+**用户的请求流程：**
 
-* 先从本地缓存中获取数据，如果本地缓存有数据则返回数据。
-* 否则从 Redis 缓存中获取数据。如果 Redis 缓存中有数据则更新本地缓存，然后将数据返回客户端。
-* 如果 Redis 缓存没有数据则去数据库查询数据，然后更新 Redis 缓存，接着再更新本地缓存，最后将数据返回给客户端。
+* 先从 Caffeine 本地缓存中获取数据，如果命中则直接返回（纳秒级响应）。
+* 未命中则查询 Redis 缓存，命中后回填 Caffeine 并返回。
+* Redis 也未命中则查询数据库，结果同时回填 Redis 和 Caffeine。
+* 空值也会被缓存（Redis 2 分钟，Caffeine 用空字符串标记），防止缓存穿透。
 
 **关于一致性的思考：**
 
-当然使用本地缓存，有一个问题是，当后端服务集群部署时，如果数据库的数据有更新的情况，本地缓存的数据和数据库的数据存在不一致的情况，如果要更新/删除本地缓存的数据，因为是集群部署，就要把所有节点的本地缓存的数据都进行更新/删除，此时这个实现稍微有些复杂，例如发送广播消息，所有实例节点监听广播消息，然后在本地缓存更新/删除。
+使用本地缓存，当后端服务集群部署时，数据库更新后各节点的本地缓存可能存在脏数据。如果要同步清理所有节点的本地缓存，需要引入 MQ 广播等复杂机制。
 
-但是其实可以使用一种更简单的方法，就是我们可以给本地缓存设置较短时间的 TTL，这样我们可以不用去管本地缓存的数据更新，而是仅依靠 TTL，去不断刷新本地缓存的数据。
-
-当因为有热 Key，导致 Redis 实例的压力过高时，为了减少 Redis 的访问压力，并且这个优惠券的详情页数据是极少去更新的，几乎不变的，因此我使用本地缓存进行优化。
+我选择了一种”重可用性、轻一致性”的策略：Caffeine 设置了 5 分钟的 TTL，依靠 TTL 过期自动刷新。对于商铺详情这种更新频率极低的数据，短暂的不一致是可以容忍的。同时在数据更新时，主动清除当前节点的两级缓存，尽可能缩短不一致窗口。
 
 
 **1. Redis 单实例压力过大，为什么不搭建 Redis 集群？**
