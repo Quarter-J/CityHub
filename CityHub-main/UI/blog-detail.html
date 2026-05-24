@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>笔记详情 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="card" id="blogContent">
+      <div class="card-body">
+        <div class="loading">加载中</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-body">
+        <div class="section-title">
+          <h2>❤️ 点赞用户</h2>
+        </div>
+        <div id="likesList" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    const blogId = new URLSearchParams(window.location.search).get('id')
+
+    function loadBlog() {
+      if (!blogId) {
+        document.querySelector('#blogContent .card-body').innerHTML = '<div class="empty-state"><p>笔记ID不存在</p></div>'
+        return
+      }
+
+      blogAPI.detail(blogId)
+        .then((res) => {
+          const blog = res.data
+          if (!blog) {
+            document.querySelector('#blogContent .card-body').innerHTML = '<div class="empty-state"><p>笔记不存在</p></div>'
+            return
+          }
+
+          const images = blog.images ? blog.images.split(',') : []
+          const imgHtml = images.length
+            ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin:16px 0;">
+                ${images.map((img) => `<img src="${img}" style="width:100%;height:200px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'">`).join('')}
+              </div>`
+            : ''
+
+          document.querySelector('#blogContent .card-body').innerHTML = `
+            <div class="blog-header" style="cursor:pointer;" onclick="window.location.href='user.html?id=${blog.userId}'">
+              <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+              <div>
+                <div class="blog-user">${blog.name || '匿名用户'}</div>
+                <div class="blog-time">${formatTime(blog.createTime)}</div>
+              </div>
+            </div>
+            <h1 style="font-size:22px;font-weight:700;margin:16px 0;">${blog.title}</h1>
+            <div style="font-size:15px;color:var(--text-secondary);line-height:1.8;">${blog.content}</div>
+            ${imgHtml}
+            ${blog.shopId ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+              <span style="font-size:13px;color:var(--text-light);">📍 关联商家</span>
+              <a href="shop-detail.html?id=${blog.shopId}" style="color:var(--primary);margin-left:8px;font-size:13px;">查看商家 →</a>
+            </div>` : ''}
+            <div class="blog-actions" style="margin-top:16px;">
+              <span class="blog-action ${blog.isLike ? 'liked' : ''}" id="likeAction" onclick="toggleLike()" style="font-size:16px;">
+                ${blog.isLike ? '❤' : '🤍'} <span id="likeCount">${blog.liked || 0}</span>
+              </span>
+            </div>
+          `
+        })
+        .catch((err) => {
+          document.querySelector('#blogContent .card-body').innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+        })
+    }
+
+    function toggleLike() {
+      if (!requireAuth()) return
+      blogAPI.like(blogId)
+        .then(() => {
+          const action = document.getElementById('likeAction')
+          const count = document.getElementById('likeCount')
+          const isLiked = action.classList.contains('liked')
+          if (isLiked) {
+            action.classList.remove('liked')
+            action.innerHTML = `🤍 <span id="likeCount">${parseInt(count.textContent) - 1}</span>`
+          } else {
+            action.classList.add('liked')
+            action.innerHTML = `❤ <span id="likeCount">${parseInt(count.textContent) + 1}</span>`
+          }
+        })
+        .catch((err) => showToast(err.message, 'error'))
+    }
+
+    function loadLikes() {
+      const container = document.getElementById('likesList')
+      blogAPI.likes(blogId)
+        .then((res) => {
+          const users = res.data || []
+          if (!users.length) {
+            container.innerHTML = '<span style="color:var(--text-light);font-size:14px;">暂无点赞</span>'
+            return
+          }
+          container.innerHTML = users.map((u) => `
+            <div style="text-align:center;cursor:pointer;" onclick="window.location.href='user.html?id=${u.id}'">
+              <img src="${u.icon || 'https://via.placeholder.com/40x40'}" 
+                   style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--border);">
+              <div style="font-size:12px;color:var(--text-light);margin-top:4px;">${u.nickName || u.name || '用户'}</div>
+            </div>
+          `).join('')
+        })
+        .catch(() => {})
+    }
+
+    function init() {
+      renderHeader()
+      loadBlog()
+      loadLikes()
+    }
+
+    init()
+  </script>
+</body>
+</html>

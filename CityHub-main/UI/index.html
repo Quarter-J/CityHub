@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CityHub - 本地生活服务平台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <a href="index.html" class="logo">City<span>Hub</span></a>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索商家..." onkeydown="if(event.key==='Enter') searchShop()">
+        <span class="search-icon" onclick="searchShop()">🔍</span>
+      </div>
+      <div class="header-actions" id="headerActions"></div>
+    </div>
+  </header>
+
+  <div class="page-container">
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-body">
+        <div class="shop-type-nav" id="typeNav"></div>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <h2 id="sectionTitle">推荐商家</h2>
+      <span class="more" id="resultCount"></span>
+    </div>
+
+    <div id="shopList" class="shop-grid"></div>
+
+    <div class="pagination" id="pagination"></div>
+
+    <div style="margin-top:40px;">
+      <div class="section-title">
+        <h2>🔥 热门笔记</h2>
+        <a href="blog.html" class="more">查看更多 →</a>
+      </div>
+      <div id="hotBlogs" class="blog-list"></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    let currentType = null
+    let currentPage = 1
+    let totalPages = 1
+    let searchKeyword = ''
+
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('search')) {
+      searchKeyword = params.get('search')
+      document.getElementById('searchInput').value = searchKeyword
+    }
+
+    function loadShopTypes() {
+      shopTypeAPI.list()
+        .then((res) => {
+          const nav = document.getElementById('typeNav')
+          nav.innerHTML = `<div class="shop-type-item ${!currentType && !searchKeyword ? 'active' : ''}" onclick="filterByType(null)">
+            <span class="type-icon">🏠</span>
+            <span class="type-name">全部</span>
+          </div>`
+          res.data.forEach((type) => {
+            nav.innerHTML += `<div class="shop-type-item ${currentType === type.id ? 'active' : ''}" onclick="filterByType(${type.id})">
+              <span class="type-icon">${type.icon || '🏪'}</span>
+              <span class="type-name">${type.name}</span>
+            </div>`
+          })
+        })
+        .catch(() => {})
+    }
+
+    function filterByType(typeId) {
+      currentType = typeId
+      currentPage = 1
+      searchKeyword = ''
+      document.getElementById('searchInput').value = ''
+      loadShops()
+      loadShopTypes()
+    }
+
+    function searchShop() {
+      const q = document.getElementById('searchInput').value.trim()
+      if (q) {
+        searchKeyword = q
+        currentType = null
+        currentPage = 1
+        loadShops()
+        loadShopTypes()
+      }
+    }
+
+    function loadShops() {
+      const container = document.getElementById('shopList')
+      const title = document.getElementById('sectionTitle')
+      const count = document.getElementById('resultCount')
+
+      container.innerHTML = '<div class="loading">加载中</div>'
+
+      let promise
+      if (searchKeyword) {
+        title.textContent = `搜索: "${searchKeyword}"`
+        promise = shopAPI.byName(searchKeyword, currentPage)
+      } else if (currentType) {
+        promise = shopAPI.byType(currentType, currentPage)
+        title.textContent = '筛选结果'
+      } else {
+        promise = shopAPI.byType(0, currentPage)
+        title.textContent = '推荐商家'
+      }
+
+      promise
+        .then((res) => {
+          const shops = res.data || []
+          count.textContent = `共 ${shops.length} 家`
+
+          if (!shops.length) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><p>暂无商家信息</p></div>`
+            return
+          }
+
+          container.innerHTML = shops.map((shop) => `
+            <div class="shop-card" onclick="window.location.href='shop-detail.html?id=${shop.id}'">
+              <img class="shop-img" src="${shop.images ? shop.images.split(',')[0] : 'https://via.placeholder.com/300x160?text=No+Image'}" 
+                   alt="${shop.name}" onerror="this.src='https://via.placeholder.com/300x160?text=No+Image'">
+              <div class="shop-info">
+                <div class="shop-name">${shop.name}</div>
+                <div class="shop-meta">
+                  <span class="shop-score">★ ${shop.score || '5.0'}</span>
+                  <span>|</span>
+                  <span>${shop.area || ''}</span>
+                </div>
+                <div class="shop-meta" style="margin-top:4px;">
+                  <span>${shop.address || ''}</span>
+                </div>
+              </div>
+            </div>
+          `).join('')
+        })
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><div class="empty-icon">😵</div><p>${err.message}</p></div>`
+        })
+    }
+
+    function loadHotBlogs() {
+      const container = document.getElementById('hotBlogs')
+      blogAPI.hot(1)
+        .then((res) => {
+          const blogs = res.data || []
+          if (!blogs.length) {
+            container.innerHTML = ''
+            return
+          }
+          container.innerHTML = blogs.slice(0, 3).map((blog) => `
+            <div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+              <div class="blog-header">
+                <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" 
+                     alt="" onerror="this.src='https://via.placeholder.com/40x40'">
+                <div>
+                  <div class="blog-user">${blog.name || '匿名用户'}</div>
+                  <div class="blog-time">${formatTime(blog.createTime)}</div>
+                </div>
+              </div>
+              <div class="blog-title">${blog.title}</div>
+              <div class="blog-content">${blog.content}</div>
+              <div class="blog-actions">
+                <span class="blog-action ${blog.isLike ? 'liked' : ''}">❤ ${blog.liked || 0}</span>
+              </div>
+            </div>
+          `).join('')
+        })
+        .catch(() => {})
+    }
+
+    function init() {
+      renderHeader()
+      loadShopTypes()
+      loadShops()
+      loadHotBlogs()
+    }
+
+    init()
+  </script>
+</body>
+</html>

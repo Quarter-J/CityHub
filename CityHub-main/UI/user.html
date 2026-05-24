@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>用户中心 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="card">
+      <div class="user-profile" id="userProfile"></div>
+    </div>
+
+    <div class="tabs" style="margin-top:20px;">
+      <span class="tab-item active" data-tab="blogs" onclick="switchTab(this, 'blogs')">📝 笔记</span>
+      <span class="tab-item" data-tab="liked" onclick="switchTab(this, 'liked')">❤️ 点赞</span>
+      <span class="tab-item" data-tab="follow" onclick="switchTab(this, 'follow')">👥 关注</span>
+    </div>
+
+    <div id="tabContent">
+      <div class="loading">加载中</div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    const targetUserId = new URLSearchParams(window.location.search).get('id')
+    const isMyPage = !targetUserId || (getUser() && String(getUser().id) === targetUserId)
+    const viewingUserId = targetUserId || (getUser() ? getUser().id : null)
+    let currentTab = 'blogs'
+
+    function switchTab(el, tab) {
+      document.querySelectorAll('.tabs .tab-item').forEach((t) => t.classList.remove('active'))
+      el.classList.add('active')
+      currentTab = tab
+      loadTabContent()
+    }
+
+    function loadProfile() {
+      const container = document.getElementById('userProfile')
+
+      if (!viewingUserId) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><p>请先登录</p><a href="login.html" class="btn btn-primary" style="margin-top:12px;">去登录</a></div>'
+        return
+      }
+
+      const userPromise = userAPI.userById(viewingUserId)
+      const infoPromise = userAPI.info(viewingUserId)
+
+      Promise.all([userPromise, infoPromise])
+        .then(([userRes, infoRes]) => {
+          const user = userRes.data
+          const info = infoRes.data
+
+          const isFollow = isMyPage ? false : true
+          container.innerHTML = `
+            <img class="user-avatar" src="${user ? user.icon || 'https://via.placeholder.com/80x80' : 'https://via.placeholder.com/80x80'}" alt="">
+            <div class="user-name">${user ? user.nickName || '用户' : '未知用户'}</div>
+            <div class="user-desc">${info ? info.introduce || '这个人很懒，什么都没留下~' : ''}</div>
+            <div class="user-stats">
+              <div class="stat-item">
+                <div class="stat-num">${info ? info.followee || 0 : 0}</div>
+                <div class="stat-label">关注</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">${info ? info.fans || 0 : 0}</div>
+                <div class="stat-label">粉丝</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num" id="blogCountStat">0</div>
+                <div class="stat-label">笔记</div>
+              </div>
+            </div>
+            ${!isMyPage && getUser()
+              ? `<button class="btn btn-outline" id="followBtn" onclick="toggleFollow()">关注</button>
+                 <button class="btn btn-outline" style="margin-left:8px;" onclick="window.location.href='follow.html?id=${viewingUserId}'">共同关注</button>`
+              : isMyPage
+                ? `<a href="follow.html" class="btn btn-outline">我的关注</a>`
+                : ''
+            }
+          `
+
+          if (!isMyPage && getUser()) {
+            followAPI.isFollow(viewingUserId)
+              .then((r) => {
+                const btn = document.getElementById('followBtn')
+                if (r.data) {
+                  btn.textContent = '已关注'
+                  btn.classList.remove('btn-outline')
+                  btn.classList.add('btn-primary')
+                  btn.dataset.followed = 'true'
+                } else {
+                  btn.textContent = '关注'
+                  btn.dataset.followed = 'false'
+                }
+              })
+              .catch(() => {})
+          }
+        })
+        .catch(() => {
+          container.innerHTML = '<div class="empty-state"><p>用户信息加载失败</p></div>'
+        })
+    }
+
+    function toggleFollow() {
+      if (!requireAuth()) return
+      const btn = document.getElementById('followBtn')
+      const isFollowed = btn.dataset.followed === 'true'
+
+      followAPI.follow(viewingUserId, !isFollowed)
+        .then(() => {
+          if (isFollowed) {
+            btn.textContent = '关注'
+            btn.classList.remove('btn-primary')
+            btn.classList.add('btn-outline')
+            btn.dataset.followed = 'false'
+            showToast('已取消关注', 'info')
+          } else {
+            btn.textContent = '已关注'
+            btn.classList.remove('btn-outline')
+            btn.classList.add('btn-primary')
+            btn.dataset.followed = 'true'
+            showToast('关注成功', 'success')
+          }
+        })
+        .catch((err) => showToast(err.message, 'error'))
+    }
+
+    function loadTabContent() {
+      const container = document.getElementById('tabContent')
+      container.innerHTML = '<div class="loading">加载中</div>'
+
+      if (currentTab === 'blogs') {
+        const apiCall = isMyPage ? blogAPI.my(1) : (viewingUserId ? blogAPI.byUser(viewingUserId, 1) : Promise.reject())
+        apiCall
+          .then((res) => {
+            const blogs = res.data || []
+            document.getElementById('blogCountStat').textContent = blogs.length
+            if (!blogs.length) {
+              container.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><p>暂无笔记</p></div>'
+              return
+            }
+            container.innerHTML = '<div class="blog-list">' + blogs.map((blog) => {
+              return `<div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+                <div class="blog-title">${blog.title}</div>
+                <div class="blog-content">${blog.content}</div>
+                <div class="blog-actions">
+                  <span class="blog-action">❤ ${blog.liked || 0}</span>
+                  <span class="blog-action">💬 ${blog.comments || 0}</span>
+                  <span class="blog-action" style="margin-left:auto;">${formatTime(blog.createTime)}</span>
+                </div>
+              </div>`
+            }).join('') + '</div>'
+          })
+          .catch(() => {
+            container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'
+          })
+      } else if (currentTab === 'liked') {
+        blogAPI.hot(1)
+          .then((res) => {
+            const blogs = (res.data || []).filter((b) => b.isLike)
+            container.innerHTML = blogs.length
+              ? '<div class="blog-list">' + blogs.map((blog) => `
+                  <div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+                    <div class="blog-header">
+                      <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+                      <div>
+                        <div class="blog-user">${blog.name || '匿名'}</div>
+                        <div class="blog-time">${formatTime(blog.createTime)}</div>
+                      </div>
+                    </div>
+                    <div class="blog-title">${blog.title}</div>
+                    <div class="blog-content">${blog.content}</div>
+                    <div class="blog-actions">
+                      <span class="blog-action liked">❤ ${blog.liked || 0}</span>
+                    </div>
+                  </div>
+                `).join('') + '</div>'
+              : '<div class="empty-state"><div class="empty-icon">❤️</div><p>暂无点赞</p></div>'
+          })
+          .catch(() => {})
+      } else if (currentTab === 'follow') {
+        container.innerHTML = '<iframe src="follow.html" style="width:100%;border:none;min-height:400px;" onload="this.style.height=this.contentWindow.document.body.scrollHeight+\'px\'"></iframe>'
+      }
+    }
+
+    function init() {
+      renderHeader()
+      loadProfile()
+      loadTabContent()
+    }
+
+    init()
+  </script>
+</body>
+</html>

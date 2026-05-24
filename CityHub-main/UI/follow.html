@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>关注管理 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="tabs">
+      <span class="tab-item active" onclick="switchTab(this, 'feed')">📰 关注推送</span>
+      <span class="tab-item" onclick="switchTab(this, 'common')">🤝 共同关注</span>
+      <span class="tab-item" onclick="switchTab(this, 'following')">👤 我的关注</span>
+    </div>
+
+    <div id="followContent">
+      <div class="loading">加载中</div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    let currentTab = 'feed'
+    let feedLastId = null
+    let feedOffset = 0
+    let hasMoreFeed = true
+    const commonUserId = new URLSearchParams(window.location.search).get('id')
+
+    function switchTab(el, tab) {
+      document.querySelectorAll('.tabs .tab-item').forEach((t) => t.classList.remove('active'))
+      el.classList.add('active')
+      currentTab = tab
+      loadContent()
+    }
+
+    function loadContent() {
+      const container = document.getElementById('followContent')
+      container.innerHTML = '<div class="loading">加载中</div>'
+
+      if (currentTab === 'feed') {
+        loadFeed()
+      } else if (currentTab === 'common') {
+        loadCommon()
+      } else if (currentTab === 'following') {
+        loadFollowing()
+      }
+    }
+
+    function loadFeed() {
+      const container = document.getElementById('followContent')
+      if (!requireAuth()) return
+
+      if (!hasMoreFeed) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><p>没有更多推送了</p></div>'
+        return
+      }
+
+      const params = {}
+      if (feedLastId) params.lastId = feedLastId
+      if (feedOffset) params.offset = feedOffset
+
+      blogAPI.followFeed(feedLastId || Date.now(), feedOffset)
+        .then((res) => {
+          const data = res.data
+          const blogs = data ? (data.records || data.list || data || []) : []
+          const minTime = data ? data.minTime : null
+
+          if (!Array.isArray(blogs) || !blogs.length) {
+            hasMoreFeed = false
+            container.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><p>暂无关注推送<br><small>关注更多用户获取推送</small></p></div>'
+            return
+          }
+
+          if (minTime) {
+            feedLastId = minTime
+            feedOffset = data.offset || 0
+          } else {
+            hasMoreFeed = false
+          }
+
+          container.innerHTML = '<div class="blog-list">' +
+            blogs.map((blog) => {
+              const images = blog.images ? blog.images.split(',') : []
+              const imgHtml = images.length
+                ? `<div class="blog-images">${images.slice(0, 3).map((img) => `<img src="${img}" onerror="this.style.display='none'">`).join('')}</div>`
+                : ''
+
+              return `<div class="blog-card">
+                <div class="blog-header">
+                  <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+                  <div>
+                    <div class="blog-user">${blog.name || '匿名'}</div>
+                    <div class="blog-time">${formatTime(blog.createTime)}</div>
+                  </div>
+                </div>
+                <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'" style="cursor:pointer;">${blog.title}</div>
+                <div class="blog-content">${blog.content}</div>
+                ${imgHtml}
+                <div class="blog-actions">
+                  <span class="blog-action ${blog.isLike ? 'liked' : ''}">❤ ${blog.liked || 0}</span>
+                </div>
+              </div>`
+            }).join('') + '</div>'
+
+          if (hasMoreFeed) {
+            container.innerHTML += '<div style="text-align:center;padding:16px;"><button class="btn btn-outline" onclick="loadFeed()">加载更多</button></div>'
+          }
+        })
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><p>${err.message || '加载失败'}</p></div>`
+        })
+    }
+
+    function loadCommon() {
+      const container = document.getElementById('followContent')
+      if (!requireAuth()) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><p>请先登录</p></div>'
+        return
+      }
+
+      if (!commonUserId) {
+        const user = getUser()
+        const id = user ? user.id : null
+        if (id) {
+          followAPI.common(id)
+            .then((res) => renderCommonUsers(res.data || [], container))
+            .catch(() => {
+              container.innerHTML = '<div class="empty-state"><p>请指定要查看的用户</p><a href="user.html" class="btn btn-primary" style="margin-top:12px;">返回用户中心</a></div>'
+            })
+        } else {
+          container.innerHTML = '<div class="empty-state"><p>请指定要查看的用户</p></div>'
+        }
+        return
+      }
+
+      followAPI.common(commonUserId)
+        .then((res) => renderCommonUsers(res.data || [], container))
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+        })
+    }
+
+    function renderCommonUsers(users, container) {
+      if (!users.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🤝</div><p>暂无共同关注</p></div>'
+        return
+      }
+
+      container.innerHTML = `<h3 style="margin-bottom:16px;font-size:16px;">共同关注 (${users.length}人)</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px;">
+          ${users.map((u) => `
+            <div style="text-align:center;padding:16px;background:var(--bg-white);border-radius:var(--radius);box-shadow:var(--shadow);" onclick="window.location.href='user.html?id=${u.id}'" style="cursor:pointer;">
+              <img src="${u.icon || 'https://via.placeholder.com/60x60'}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;margin-bottom:8px;">
+              <div style="font-size:14px;font-weight:500;">${u.nickName || u.name || '用户'}</div>
+            </div>
+          `).join('')}
+        </div>`
+    }
+
+    function loadFollowing() {
+      const container = document.getElementById('followContent')
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><p>关注用户管理</p><a href="user.html" class="btn btn-primary" style="margin-top:12px;">返回个人中心</a></div>'
+    }
+
+    function init() {
+      renderHeader()
+      loadContent()
+    }
+
+    init()
+  </script>
+</body>
+</html>

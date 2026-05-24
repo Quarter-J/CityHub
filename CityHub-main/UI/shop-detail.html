@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商铺详情 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="shop-detail-header" id="shopBanner"></div>
+
+    <div class="shop-detail-info" id="shopInfo"></div>
+
+    <div style="margin-top:20px;">
+      <div class="section-title">
+        <h2>🎫 优惠券</h2>
+      </div>
+      <div id="voucherSection" class="voucher-list"></div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="section-title">
+        <h2>📝 相关笔记</h2>
+      </div>
+      <div id="shopBlogs" class="blog-list"></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    const shopId = new URLSearchParams(window.location.search).get('id')
+
+    function loadShop() {
+      if (!shopId) {
+        document.getElementById('shopBanner').innerHTML = '<div class="empty-state"><p>商铺ID不存在</p></div>'
+        return
+      }
+
+      shopAPI.detail(shopId)
+        .then((res) => {
+          const shop = res.data
+          if (!shop) {
+            document.getElementById('shopInfo').innerHTML = '<div class="empty-state"><p>商铺不存在</p></div>'
+            return
+          }
+
+          const images = shop.images ? shop.images.split(',') : []
+          document.getElementById('shopBanner').innerHTML = `
+            <img class="shop-banner" src="${images[0] || 'https://via.placeholder.com/800x300?text=No+Image'}" 
+                 alt="${shop.name}" onerror="this.src='https://via.placeholder.com/800x300?text=No+Image'">
+          `
+
+          document.getElementById('shopInfo').innerHTML = `
+            <div class="shop-name">${shop.name}</div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+              <span style="color:var(--secondary);font-weight:600;font-size:18px;">★ ${shop.score || '5.0'}</span>
+              <span style="color:var(--text-light);">已售 ${shop.sold || 0}</span>
+            </div>
+            <div class="shop-address">📍 ${shop.address || '地址不详'}</div>
+            ${shop.area ? `<div class="shop-address">📌 ${shop.area}</div>` : ''}
+            <div class="shop-tags">
+              <span class="tag tag-normal">${shop.typeName || '综合'}</span>
+              ${shop.averagePrice ? `<span class="tag tag-normal">人均 ¥${shop.averagePrice}</span>` : ''}
+            </div>
+          `
+        })
+        .catch((err) => {
+          document.getElementById('shopInfo').innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+        })
+    }
+
+    function loadVouchers() {
+      const container = document.getElementById('voucherSection')
+      if (!shopId) return
+
+      voucherAPI.listByShop(shopId)
+        .then((res) => {
+          const vouchers = res.data || []
+          if (!vouchers.length) {
+            container.innerHTML = '<div class="empty-state"><p>暂无优惠券</p></div>'
+            return
+          }
+
+          container.innerHTML = vouchers.map((v) => {
+            const isSeckill = v.type === 1
+            return `<div class="voucher-card">
+              <div class="voucher-left" style="background:${isSeckill ? 'linear-gradient(135deg, #ff4d4f, #ff7a45)' : 'linear-gradient(135deg, #1890ff, #69c0ff)'}">
+                <div class="v-price">${v.payValue}</div>
+                <div class="v-unit">元</div>
+              </div>
+              <div class="voucher-right">
+                <div class="voucher-title">${v.title}</div>
+                <div class="voucher-desc">${v.subTitle || '优惠券描述'}</div>
+                <div class="voucher-footer">
+                  <span class="${isSeckill ? 'tag-seckill' : 'tag-normal'} tag">${isSeckill ? '⚡ 秒杀' : '普通券'}</span>
+                  ${isSeckill
+                    ? `<button class="btn btn-primary btn-sm" onclick="window.location.href='seckill.html?id=${v.id}'">立即抢购</button>`
+                    : `<span class="voucher-stock">满${v.condition || 0}元可用</span>`
+                  }
+                </div>
+              </div>
+            </div>`
+          }).join('')
+        })
+        .catch(() => {
+          container.innerHTML = '<div class="empty-state"><p>暂无优惠券</p></div>'
+        })
+    }
+
+    function loadShopBlogs() {
+      const container = document.getElementById('shopBlogs')
+      blogAPI.hot(1)
+        .then((res) => {
+          const blogs = (res.data || []).filter((b) => String(b.shopId) === shopId)
+          if (!blogs.length) {
+            container.innerHTML = '<div class="empty-state"><p>暂无相关笔记</p></div>'
+            return
+          }
+          container.innerHTML = blogs.map((blog) => `
+            <div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+              <div class="blog-header">
+                <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+                <div>
+                  <div class="blog-user">${blog.name || '匿名'}</div>
+                  <div class="blog-time">${formatTime(blog.createTime)}</div>
+                </div>
+              </div>
+              <div class="blog-title">${blog.title}</div>
+              <div class="blog-content">${blog.content}</div>
+              <div class="blog-actions">
+                <span class="blog-action">❤ ${blog.liked || 0}</span>
+              </div>
+            </div>
+          `).join('')
+        })
+        .catch(() => {})
+    }
+
+    function init() {
+      renderHeader()
+      loadShop()
+      loadVouchers()
+      loadShopBlogs()
+    }
+
+    init()
+  </script>
+</body>
+</html>

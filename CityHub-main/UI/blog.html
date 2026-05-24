@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>热门笔记 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="section-title">
+      <h2>🔥 热门笔记</h2>
+    </div>
+
+    <div id="blogList" class="blog-list"></div>
+
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <div class="modal-overlay" id="publishModal" style="display:none;" onclick="if(event.target===this)closePublish()">
+    <div class="modal-content">
+      <div class="modal-title">发布笔记</div>
+      <div class="form-group">
+        <label>标题</label>
+        <input type="text" id="blogTitle" class="form-control" placeholder="输入笔记标题">
+      </div>
+      <div class="form-group">
+        <label>关联商铺ID（可选）</label>
+        <input type="text" id="blogShopId" class="form-control" placeholder="输入商铺ID">
+      </div>
+      <div class="form-group">
+        <label>内容</label>
+        <textarea id="blogContent" class="form-control" placeholder="分享你的探店体验..." rows="5"></textarea>
+      </div>
+      <div class="form-group">
+        <label>上传图片</label>
+        <input type="file" id="blogImages" class="form-control" accept="image/*" multiple onchange="previewImages()">
+        <div id="imagePreview" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closePublish()">取消</button>
+        <button class="btn btn-primary" onclick="submitBlog()">发布</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    let currentPage = 1
+    let uploadedImages = []
+
+    function loadBlogs() {
+      const container = document.getElementById('blogList')
+      container.innerHTML = '<div class="loading">加载中</div>'
+
+      blogAPI.hot(currentPage)
+        .then((res) => {
+          const blogs = res.data || []
+          if (!blogs.length) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><p>暂无笔记</p></div>'
+            return
+          }
+
+          container.innerHTML = blogs.map((blog) => {
+            const images = blog.images ? blog.images.split(',') : []
+            const imgHtml = images.length
+              ? `<div class="blog-images">${images.slice(0, 3).map((img) => `<img src="${img}" onerror="this.style.display='none'">`).join('')}</div>`
+              : ''
+
+            return `<div class="blog-card">
+              <div class="blog-header" onclick="window.location.href='user.html?id=${blog.userId}'" style="cursor:pointer;">
+                <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+                <div>
+                  <div class="blog-user">${blog.name || '匿名用户'}</div>
+                  <div class="blog-time">${formatTime(blog.createTime)}</div>
+                </div>
+              </div>
+              <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'" style="cursor:pointer;">${blog.title}</div>
+              <div class="blog-content">${blog.content}</div>
+              ${imgHtml}
+              <div class="blog-actions">
+                <span class="blog-action ${blog.isLike ? 'liked' : ''}" onclick="toggleLike(${blog.id}, this)">
+                  ${blog.isLike ? '❤' : '🤍'} <span class="like-count">${blog.liked || 0}</span>
+                </span>
+                <span class="blog-action" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+                  💬 ${blog.comments || 0}
+                </span>
+              </div>
+            </div>`
+          }).join('')
+        })
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+        })
+    }
+
+    function toggleLike(blogId, el) {
+      if (!requireAuth()) return
+      blogAPI.like(blogId)
+        .then(() => {
+          const countEl = el.querySelector('.like-count')
+          const isLiked = el.classList.contains('liked')
+          if (isLiked) {
+            el.classList.remove('liked')
+            el.innerHTML = `🤍 <span class="like-count">${parseInt(countEl.textContent) - 1}</span>`
+          } else {
+            el.classList.add('liked')
+            el.innerHTML = `❤ <span class="like-count">${parseInt(countEl.textContent) + 1}</span>`
+          }
+        })
+        .catch((err) => showToast(err.message, 'error'))
+    }
+
+    function openPublish() {
+      if (!requireAuth()) return
+      document.getElementById('publishModal').style.display = 'flex'
+    }
+
+    function closePublish() {
+      document.getElementById('publishModal').style.display = 'none'
+      document.getElementById('blogTitle').value = ''
+      document.getElementById('blogContent').value = ''
+      document.getElementById('blogImages').value = ''
+      document.getElementById('imagePreview').innerHTML = ''
+      uploadedImages = []
+    }
+
+    function previewImages() {
+      const files = document.getElementById('blogImages').files
+      const preview = document.getElementById('imagePreview')
+      preview.innerHTML = ''
+      Array.from(files).forEach((file) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const img = document.createElement('img')
+          img.src = e.target.result
+          img.style.width = '80px'
+          img.style.height = '80px'
+          img.style.objectFit = 'cover'
+          img.style.borderRadius = '4px'
+          preview.appendChild(img)
+        }
+        reader.readAsDataURL(file)
+      })
+    }
+
+    function submitBlog() {
+      const title = document.getElementById('blogTitle').value.trim()
+      const content = document.getElementById('blogContent').value.trim()
+      const shopId = document.getElementById('blogShopId').value.trim()
+
+      if (!title) { showToast('请输入标题', 'error'); return }
+      if (!content) { showToast('请输入内容', 'error'); return }
+
+      const files = document.getElementById('blogImages').files
+      let uploadPromises = []
+
+      if (files.length) {
+        uploadPromises = Array.from(files).map((file) => uploadAPI.blogImage(file).then((r) => r.data || ''))
+      }
+
+      Promise.all(uploadPromises)
+        .then((imgNames) => {
+          const blog = {
+            title,
+            content,
+            images: imgNames.join(','),
+          }
+          if (shopId) blog.shopId = parseInt(shopId)
+
+          return blogAPI.save(blog)
+        })
+        .then(() => {
+          showToast('发布成功', 'success')
+          closePublish()
+          currentPage = 1
+          loadBlogs()
+        })
+        .catch((err) => showToast(err.message || '发布失败', 'error'))
+    }
+
+    function init() {
+      renderHeader()
+      loadBlogs()
+
+      const user = getUser()
+      const pagination = document.getElementById('pagination')
+      if (user) {
+        pagination.innerHTML = `
+          <button class="btn btn-primary" onclick="openPublish()" style="border-radius:8px;">✏️ 发布笔记</button>
+        `
+      }
+    }
+
+    init()
+  </script>
+</body>
+</html>

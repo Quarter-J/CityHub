@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>秒杀 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div id="seckillContent">
+      <div class="loading">加载中</div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    const voucherId = new URLSearchParams(window.location.search).get('id')
+    let timerInterval = null
+    let seckillData = null
+    let isProcessing = false
+
+    function loadSeckill() {
+      if (!voucherId) {
+        document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>秒杀券ID不存在</p></div>'
+        return
+      }
+
+      document.getElementById('seckillContent').innerHTML = '<div class="loading">加载中</div>'
+
+      voucherAPI.listByShop(0)
+        .then((res) => {
+          const all = res.data || []
+          seckillData = all.find((v) => String(v.id) === voucherId)
+          if (!seckillData) {
+            document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>秒杀券不存在或已下架</p></div>'
+            return
+          }
+          renderSeckill()
+        })
+        .catch(() => {
+          document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>加载失败</p></div>'
+        })
+    }
+
+    function renderSeckill() {
+      const v = seckillData
+      const container = document.getElementById('seckillContent')
+
+      let statusHtml = ''
+      const now = Date.now()
+      const begin = v.beginTime ? new Date(v.beginTime).getTime() : now - 10000
+      const end = v.endTime ? new Date(v.endTime).getTime() : now + 86400000
+
+      if (now < begin) {
+        statusHtml = `<div class="seckill-timer">
+          <div class="timer-label">距离开始还有</div>
+          <div class="timer-display" id="timerDisplay">--:--:--</div>
+        </div>`
+      } else if (now >= begin && now <= end) {
+        statusHtml = `<div class="seckill-timer" style="background:linear-gradient(135deg, #ff4d4f, #ff7a45);">
+          <div class="timer-label">⚡ 秒杀进行中</div>
+          <div class="timer-display" style="font-size:24px;">剩余 ${formatTimeRemaining(end - now)}</div>
+        </div>`
+      } else {
+        statusHtml = `<div class="seckill-timer" style="background:linear-gradient(135deg, #999, #666);">
+          <div class="timer-label">秒杀已结束</div>
+        </div>`
+      }
+
+      container.innerHTML = `
+        ${statusHtml}
+
+        <div class="card">
+          <div class="card-body" style="text-align:center;padding:32px;">
+            <div style="font-size:48px;font-weight:700;color:var(--primary);">¥${v.payValue}</div>
+            <div style="font-size:20px;font-weight:600;margin:12px 0;">${v.title}</div>
+            <div style="color:var(--text-light);margin-bottom:12px;">${v.subTitle || ''}</div>
+
+            <div style="display:flex;justify-content:center;gap:32px;margin:20px 0;">
+              <div>
+                <div style="font-size:24px;font-weight:700;color:var(--text);">${v.stock ?? '--'}</div>
+                <div style="font-size:12px;color:var(--text-light);">剩余库存</div>
+              </div>
+              <div>
+                <div style="font-size:24px;font-weight:700;color:var(--secondary);">¥${v.value}</div>
+                <div style="font-size:12px;color:var(--text-light);">原价</div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-lg" id="seckillBtn" onclick="doSeckill()" 
+                    style="border-radius:8px;${now > end ? 'opacity:0.3;cursor:not-allowed;' : ''}"
+                    ${now > end ? 'disabled' : ''}>
+              ${now < begin ? '等待开始' : now > end ? '已结束' : '立即抢购'}
+            </button>
+          </div>
+        </div>`
+
+      if (now < begin) {
+        startCountdown(begin)
+      } else if (now >= begin && now <= end) {
+        startCountdown(end)
+      }
+    }
+
+    function formatTimeRemaining(ms) {
+      if (ms <= 0) return '00:00:00'
+      const h = Math.floor(ms / 3600000)
+      const m = Math.floor((ms % 3600000) / 60000)
+      const s = Math.floor((ms % 60000) / 1000)
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    }
+
+    function startCountdown(targetTime) {
+      if (timerInterval) clearInterval(timerInterval)
+      timerInterval = setInterval(() => {
+        const now = Date.now()
+        const diff = targetTime - now
+        const display = document.getElementById('timerDisplay')
+        if (display) {
+          if (diff <= 0) {
+            clearInterval(timerInterval)
+            renderSeckill()
+          } else {
+            display.textContent = formatTimeRemaining(diff)
+          }
+        }
+      }, 1000)
+    }
+
+    function doSeckill() {
+      if (!requireAuth()) return
+      if (isProcessing) return
+
+      isProcessing = true
+      const btn = document.getElementById('seckillBtn')
+      btn.textContent = '处理中...'
+      btn.disabled = true
+
+      seckillAPI.order(voucherId)
+        .then((res) => {
+          showToast('抢购成功！订单已生成', 'success')
+          btn.textContent = '已抢购'
+        })
+        .catch((err) => {
+          showToast(err.message || '抢购失败', 'error')
+          btn.textContent = '再次抢购'
+          btn.disabled = false
+        })
+        .finally(() => {
+          isProcessing = false
+        })
+    }
+
+    function init() {
+      renderHeader()
+      loadSeckill()
+    }
+
+    init()
+  </script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>优惠券 - CityHub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header"></header>
+
+  <div class="page-container">
+    <div class="section-title">
+      <h2>🎫 全部优惠券</h2>
+    </div>
+
+    <div class="tabs">
+      <span class="tab-item active" data-type="all" onclick="switchTab(this, 'all')">全部</span>
+      <span class="tab-item" data-type="normal" onclick="switchTab(this, 'normal')">普通券</span>
+      <span class="tab-item" data-type="seckill" onclick="switchTab(this, 'seckill')">秒杀券</span>
+    </div>
+
+    <div class="tabs" style="border-bottom:none;margin-bottom:16px;">
+      <span class="tab-item active" data-shop="all" onclick="switchShop(this, 'all')">全部商铺</span>
+    </div>
+
+    <div id="voucherList" class="voucher-list"></div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    let allVouchers = []
+    let filterType = 'all'
+    let filterShop = 'all'
+
+    function switchTab(el, type) {
+      document.querySelectorAll('.tabs:first-of-type .tab-item').forEach((t) => t.classList.remove('active'))
+      el.classList.add('active')
+      filterType = type
+      render()
+    }
+
+    function switchShop(el, shopId) {
+      document.querySelectorAll('.tabs:last-of-type .tab-item').forEach((t) => t.classList.remove('active'))
+      el.classList.add('active')
+      filterShop = shopId
+      render()
+    }
+
+    function loadShopTabs() {
+      shopTypeAPI.list().then((res) => {
+        const container = document.querySelector('.tabs:last-of-type')
+        ;(res.data || []).forEach((type) => {
+          container.innerHTML += `<span class="tab-item" data-shop="${type.id}" onclick="switchShop(this, ${type.id})">${type.name}</span>`
+        })
+      }).catch(() => {})
+    }
+
+    function loadAllVouchers() {
+      const container = document.getElementById('voucherList')
+      container.innerHTML = '<div class="loading">加载中</div>'
+
+      const promises = []
+      shopTypeAPI.list().then((res) => {
+        const shops = res.data || []
+        const shopIds = shops.map((s) => s.id)
+        if (!shopIds.length) {
+          render()
+          return
+        }
+        shopIds.forEach((typeId) => {
+          promises.push(
+            shopAPI.byType(typeId, 1, null, null)
+              .then((r) => r.data || [])
+              .catch(() => [])
+          )
+        })
+        Promise.all(promises).then((results) => {
+          const allShops = results.flat()
+          const ids = [...new Set(allShops.map((s) => s.id))]
+          const voucherPromises = ids.map((sid) =>
+            voucherAPI.listByShop(sid)
+              .then((r) => (r.data || []).map((v) => ({ ...v, shopId: sid })))
+              .catch(() => [])
+          )
+          Promise.all(voucherPromises).then((vResults) => {
+            allVouchers = vResults.flat()
+            render()
+          })
+        })
+      }).catch(() => {
+        render()
+      })
+    }
+
+    function render() {
+      const container = document.getElementById('voucherList')
+      let list = allVouchers
+
+      if (filterType === 'normal') list = list.filter((v) => v.type === 0)
+      else if (filterType === 'seckill') list = list.filter((v) => v.type === 1)
+
+      if (filterShop !== 'all') {
+        shopAPI.byType(filterShop, 1, null, null)
+          .then((r) => {
+            const shopIds = (r.data || []).map((s) => s.id)
+            list = list.filter((v) => shopIds.includes(v.shopId))
+            renderList(list, container)
+          })
+          .catch(() => renderList(list, container))
+      } else {
+        renderList(list, container)
+      }
+    }
+
+    function renderList(list, container) {
+      if (!list.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🎫</div><p>暂无优惠券</p></div>'
+        return
+      }
+
+      container.innerHTML = list.map((v) => {
+        const isSeckill = v.type === 1
+        return `<div class="voucher-card">
+          <div class="voucher-left" style="background:${isSeckill ? 'linear-gradient(135deg, #ff4d4f, #ff7a45)' : 'linear-gradient(135deg, #1890ff, #69c0ff)'}">
+            <div class="v-price">${v.payValue}</div>
+            <div class="v-unit">元</div>
+          </div>
+          <div class="voucher-right">
+            <div class="voucher-title">${v.title}</div>
+            <div class="voucher-desc">${v.subTitle || '超值优惠，限时抢购'}</div>
+            <div class="voucher-footer">
+              <span class="${isSeckill ? 'tag-seckill' : 'tag-normal'} tag">${isSeckill ? '⚡ 秒杀' : '普通券'}</span>
+              ${isSeckill
+                ? `<button class="btn btn-primary btn-sm" onclick="window.location.href='seckill.html?id=${v.id}'">立即抢购</button>`
+                : `<span class="voucher-stock">满${v.condition || 0}元可用</span>`
+              }
+            </div>
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    function init() {
+      renderHeader()
+      loadShopTabs()
+      loadAllVouchers()
+    }
+
+    init()
+  </script>
+</body>
+</html>
