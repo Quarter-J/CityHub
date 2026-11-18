@@ -8,8 +8,16 @@
 </head>
 <body>
   <div class="login-page">
+    <button class="theme-toggle login-float-toggle" onclick="toggleTheme()" aria-label="切换主题" title="切换主题">
+      <span data-icon="sun" class="icon-sun"></span>
+      <span data-icon="moon" class="icon-moon"></span>
+    </button>
+
     <div class="login-box">
-      <div class="login-title">CityHub</div>
+      <div class="login-brand">
+        <span class="logo-mark"><span data-icon="pin"></span></span>
+      </div>
+      <div class="login-title">欢迎来到 CityHub</div>
       <div class="login-subtitle">本地生活，尽在掌握</div>
 
       <div id="loginForm">
@@ -26,17 +34,22 @@
           </div>
         </div>
 
-        <button class="btn btn-primary btn-block btn-lg" onclick="doLogin()" style="margin-top:8px;border-radius:8px;">
+        <button class="btn btn-primary btn-block btn-lg" onclick="doLogin()" style="margin-top:8px;">
           登录
         </button>
       </div>
 
-      <div style="text-align:center;margin-top:20px;font-size:13px;color:var(--text-light);">
+      <div style="text-align:center;margin-top:24px;font-size:13px;color:var(--text-light);">
         登录即表示同意 <a href="#" style="color:var(--primary)">服务条款</a> 和 <a href="#" style="color:var(--primary)">隐私政策</a>
+      </div>
+
+      <div style="text-align:center;margin-top:16px;">
+        <a href="index.html" style="font-size:13px;color:var(--text-light);"><span data-icon="arrow-left"></span> 返回首页</a>
       </div>
     </div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     let countdown = 0

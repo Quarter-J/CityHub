@@ -1,5 +1,30 @@
 const API_BASE = 'http://localhost:8081'
 const TOKEN_KEY = 'cityhub_token'
+const THEME_KEY = 'cityhub_theme'
+
+/* ========== 主题管理 ========== */
+function getTheme() {
+  const saved = localStorage.getItem(THEME_KEY)
+  if (saved === 'light' || saved === 'dark') return saved
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem(THEME_KEY, theme)
+}
+
+function toggleTheme() {
+  const current = getTheme()
+  setTheme(current === 'dark' ? 'light' : 'dark')
+}
+
+function initTheme() {
+  setTheme(getTheme())
+}
+
+// 尽早应用主题，避免闪烁
+initTheme()
 
 const request = (config) => {
   const { url, method = 'GET', data = null, params = null } = config
@@ -56,6 +81,21 @@ const userAPI = {
 
   userById: (id) =>
     request({ url: `/user/${id}` }),
+
+  update: (data) =>
+    request({ url: '/user/update', method: 'PUT', data }),
+
+  updateInfo: (data) =>
+    request({ url: '/user/info', method: 'PUT', data }),
+
+  sign: () =>
+    request({ url: '/user/sign', method: 'POST' }),
+
+  signCount: () =>
+    request({ url: '/user/sign/count' }),
+
+  signStatus: () =>
+    request({ url: '/user/sign/status' }),
 }
 
 /* ========== 商铺模块 ========== */
@@ -92,6 +132,12 @@ const voucherAPI = {
 
   listByShop: (shopId) =>
     request({ url: `/voucher/list/${shopId}` }),
+
+  detail: (id) =>
+    request({ url: `/voucher/${id}` }),
+
+  all: (type, current = 1) =>
+    request({ url: '/voucher/all', params: { type, current } }),
 }
 
 /* ========== 秒杀模块 ========== */
@@ -125,6 +171,12 @@ const blogAPI = {
 
   followFeed: (lastId, offset = 0) =>
     request({ url: '/blog/of/follow', params: { lastId, offset } }),
+
+  ofLiked: (current = 1) =>
+    request({ url: '/blog/of/liked', params: { current } }),
+
+  ofShop: (shopId, current = 1) =>
+    request({ url: '/blog/of/shop', params: { shopId, current } }),
 }
 
 /* ========== 关注模块 ========== */
@@ -137,6 +189,24 @@ const followAPI = {
 
   common: (id) =>
     request({ url: `/follow/common/${id}` }),
+
+  ofMe: () =>
+    request({ url: '/follow/of/me' }),
+
+  fans: (id) =>
+    request({ url: `/follow/fans/${id}` }),
+}
+
+/* ========== 评论模块 ========== */
+const commentAPI = {
+  list: (blogId, current = 1) =>
+    request({ url: `/blog-comments/of/blog/${blogId}`, params: { current } }),
+
+  add: (data) =>
+    request({ url: '/blog-comments', method: 'POST', data }),
+
+  remove: (id) =>
+    request({ url: `/blog-comments/${id}`, method: 'DELETE' }),
 }
 
 /* ========== 上传模块 ========== */
@@ -146,6 +216,17 @@ const uploadAPI = {
     formData.append('file', file)
     const token = localStorage.getItem(TOKEN_KEY)
     return fetch(`${API_BASE}/upload/blog`, {
+      method: 'POST',
+      headers: token ? { authorization: token } : {},
+      body: formData,
+    }).then((r) => r.json())
+  },
+
+  avatar: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = localStorage.getItem(TOKEN_KEY)
+    return fetch(`${API_BASE}/upload/avatar`, {
       method: 'POST',
       headers: token ? { authorization: token } : {},
       body: formData,
@@ -186,10 +267,10 @@ function showToast(message, type = 'info') {
     document.body.appendChild(container)
   }
 
-  const icons = { success: '✓', error: '✕', info: 'ℹ' }
+  const icons = { success: 'check', error: 'alert', info: 'info' }
   const toast = document.createElement('div')
   toast.className = `toast toast-${type}`
-  toast.innerHTML = `<span>${icons[type] || ''}</span><span>${message}</span>`
+  toast.innerHTML = `${icon(icons[type] || 'info')}<span>${message}</span>`
   container.appendChild(toast)
 
   setTimeout(() => {
@@ -226,31 +307,59 @@ function requireAuth() {
   return true
 }
 
+/* ========== 顶部导航 ========== */
+
+function themeToggleHtml() {
+  return `<button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题" title="切换主题">
+    ${icon('sun', 'icon-sun')}
+    ${icon('moon', 'icon-moon')}
+  </button>`
+}
+
 function renderHeader() {
   const header = document.querySelector('.app-header')
   if (!header) return
   const user = getUser()
+  const fileName = (window.location.pathname.split('/').pop() || '').toLowerCase()
+
+  const navItems = [
+    { href: 'index.html', label: '首页', match: ['index.html', ''] },
+    { href: 'voucher.html', label: '优惠券', match: ['voucher.html', 'seckill.html'] },
+    { href: 'blog.html', label: '笔记', match: ['blog.html', 'blog-detail.html'] },
+    { href: 'follow.html', label: '关注', match: ['follow.html'] },
+  ]
+
+  const navHtml = navItems
+    .map((item) => {
+      const active = item.match.includes(fileName)
+      return `<a href="${item.href}" class="${active ? 'active' : ''}">${item.label}</a>`
+    })
+    .join('')
+
   const userHtml = user
     ? `<div class="header-actions">
-         <a href="user.html">${user.nickName || user.icon || '我的'}</a>
-         <a href="blog.html">笔记</a>
+         <a href="user.html">${user.nickName || '我的'}</a>
          <a href="javascript:void(0)" onclick="handleLogout()">退出</a>
+         ${themeToggleHtml()}
+         <a href="user.html"><img class="avatar-sm" src="${user.icon || 'https://via.placeholder.com/40x40'}" alt=""></a>
        </div>`
     : `<div class="header-actions">
-         <a href="blog.html">笔记</a>
          <a href="login.html" class="btn-login">登录</a>
+         ${themeToggleHtml()}
        </div>`
 
-  const searchHtml = window.location.pathname.includes('index') || window.location.pathname.endsWith('/UI/') || window.location.pathname.endsWith('/UI')
+  const isHome = fileName === 'index.html' || fileName === ''
+  const searchHtml = isHome
     ? `<div class="search-box">
          <input type="text" id="searchInput" placeholder="搜索商家..." onkeydown="if(event.key==='Enter') searchShop()">
-         <span class="search-icon" onclick="searchShop()">🔍</span>
+         <button type="button" class="search-icon" onclick="searchShop()" aria-label="搜索商家">${icon('search')}</button>
        </div>`
     : ''
 
   header.innerHTML = `
     <div class="header-inner">
-      <a href="index.html" class="logo">City<span>Hub</span></a>
+      <a href="index.html" class="logo"><span class="logo-mark">${icon('pin')}</span>City<span>Hub</span></a>
+      <nav class="nav-links">${navHtml}</nav>
       ${searchHtml}
       ${userHtml}
     </div>
@@ -271,7 +380,3 @@ function searchShop() {
     window.location.href = `index.html?search=${encodeURIComponent(q)}`
   }
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-  renderHeader()
-})

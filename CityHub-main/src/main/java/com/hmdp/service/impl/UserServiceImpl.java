@@ -2,7 +2,6 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
-import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -10,13 +9,16 @@ import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
+import com.hmdp.entity.UserInfo;
 import com.hmdp.mapper.UserMapper;
+import com.hmdp.service.IUserInfoService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -46,6 +48,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private IUserInfoService userInfoService;
+
+    @Resource
+    private JwtTokenService jwtTokenService;
     /**
      * 发送验证码
      * @param phone
@@ -88,7 +96,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号格式错误");
         }
         //3.校验验证码
-        String cacheCode = stringRedisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY+phone);
+        String cacheCode = stringRedisTemplate.opsForValue().getAndDelete(RedisConstants.LOGIN_CODE_KEY + phone);
         if(cacheCode==null||!cacheCode.equals(code)){
            return Result.fail("验证码不一致，请重新输入");
        }
@@ -100,11 +108,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         //6.不存在，创建新用户，保存到数据库
         if(user==null){
-           user=createUserWithPhone(phone);
+            try {
+                user = createUserWithPhone(phone);
+            } catch (DuplicateKeyException e) {
+                user = query().eq("phone", phone).one();
+                if (user == null) {
+                    throw e;
+                }
+            }
         }
         //7.存在 保存到redis
-        //7.1 生成个token作为登陆令牌
-        String token = UUID.randomUUID().toString(true);
+        //7.1 生成带签名和过期时间的 JWT
+        String token = jwtTokenService.createToken(user.getId());
 
         //7.2 将user对象转为Hash存储
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
@@ -114,7 +129,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         //7.3 存储
         String tokenKey=RedisConstants.LOGIN_USER_KEY+token;
         stringRedisTemplate.opsForHash().putAll(tokenKey,map);
-        stringRedisTemplate.expire(tokenKey,30,TimeUnit.MINUTES);
+        stringRedisTemplate.expire(tokenKey, jwtTokenService.getTtlMinutes(), TimeUnit.MINUTES);
         //8.返回token
         return Result.ok(token);
     }
@@ -175,6 +190,93 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         return Result.ok(count);
 
+    }
+
+    @Override
+    public Result signStatus() {
+        //1.获取当前登录用户
+        Long userId = UserHolder.getUser().getId();
+        //2.获取日期
+        LocalDateTime now = LocalDateTime.now();
+        //3.拼接key
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = USER_SIGN_KEY + userId + keySuffix;
+        //4.获取今天是这个月的第几天
+        int dayOfMonth = now.getDayOfMonth();
+        //5.读取今天对应的bit位，true 表示已签到
+        Boolean signed = stringRedisTemplate.opsForValue().getBit(key, dayOfMonth - 1);
+        return Result.ok(Boolean.TRUE.equals(signed));
+    }
+
+    @Override
+    public Result logout(String token) {
+        //1.删除redis中的token
+        if (cn.hutool.core.util.StrUtil.isNotBlank(token)) {
+            stringRedisTemplate.delete(RedisConstants.LOGIN_USER_KEY + token);
+        }
+        //2.清除ThreadLocal
+        UserHolder.removeUser();
+        return Result.ok();
+    }
+
+    @Override
+    public Result updateUser(User user, String token) {
+        //1.校验登录
+        UserDTO current = UserHolder.getUser();
+        if (current == null) {
+            return Result.fail("请先登录");
+        }
+        Long userId = current.getId();
+        //2.只更新昵称和头像，忽略空值，避免覆盖为默认值
+        String nickName = user.getNickName();
+        String icon = user.getIcon();
+        boolean updated = update()
+                .set(cn.hutool.core.util.StrUtil.isNotBlank(nickName), "nick_name", nickName)
+                .set(cn.hutool.core.util.StrUtil.isNotBlank(icon), "icon", icon)
+                .eq("id", userId)
+                .update();
+        if (!updated) {
+            return Result.fail("修改失败");
+        }
+        //3.同步更新redis中的用户信息，保证/me及时返回新数据
+        if (cn.hutool.core.util.StrUtil.isNotBlank(token)) {
+            String tokenKey = RedisConstants.LOGIN_USER_KEY + token;
+            Map<String, String> map = new HashMap<>();
+            if (cn.hutool.core.util.StrUtil.isNotBlank(nickName)) {
+                map.put("nickName", nickName);
+            }
+            if (cn.hutool.core.util.StrUtil.isNotBlank(icon)) {
+                map.put("icon", icon);
+            }
+            if (!map.isEmpty()) {
+                stringRedisTemplate.opsForHash().putAll(tokenKey, map);
+            }
+        }
+        return Result.ok();
+    }
+
+    @Override
+    public Result updateUserInfo(UserInfo userInfo) {
+        //1.校验登录
+        UserDTO current = UserHolder.getUser();
+        if (current == null) {
+            return Result.fail("请先登录");
+        }
+        //2.只更新允许修改的资料字段
+        UserInfo update = new UserInfo();
+        update.setUserId(current.getId());
+        update.setCity(userInfo.getCity());
+        update.setIntroduce(userInfo.getIntroduce());
+        update.setGender(userInfo.getGender());
+        update.setBirthday(userInfo.getBirthday());
+        //首次保存时补全计数默认值，避免插入 NULL
+        if (userInfoService.getById(current.getId()) == null) {
+            update.setFans(0);
+            update.setFollowee(0);
+            update.setCredits(0);
+        }
+        userInfoService.saveOrUpdate(update);
+        return Result.ok();
     }
 
     private User createUserWithPhone(String phone) {

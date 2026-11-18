@@ -1,6 +1,5 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -9,6 +8,8 @@ import com.hmdp.entity.Shop;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
 import java.time.LocalDateTime;
 import java.util.concurrent.ExecutorService;
@@ -21,10 +22,13 @@ import java.util.function.Function;
 public class CacheClient {
     private final StringRedisTemplate stringRedisTemplate;
     private final Cache<String, Object> caffeineCache;
+    private final RedissonClient redissonClient;
 
-    public CacheClient(StringRedisTemplate stringRedisTemplate, Cache<String, Object> caffeineCache) {
+    public CacheClient(StringRedisTemplate stringRedisTemplate, Cache<String, Object> caffeineCache,
+                       RedissonClient redissonClient) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.caffeineCache = caffeineCache;
+        this.redissonClient = redissonClient;
     }
 
     public void set(String key, Object value, Long time, TimeUnit unit) {
@@ -74,20 +78,7 @@ public class CacheClient {
         if (expireTime.isAfter(LocalDateTime.now())) {
             return shop;
         }
-        String lockKey = RedisConstants.LOCK_SHOP_KEY + id;
-        boolean isLock = tryLock(lockKey);
-        if (isLock) {
-            CACHE_REBUILD_EXECUTOR.submit(() -> {
-                try {
-                    R r1 = dbFallback.apply(id);
-                    this.setWithLogicalExpire(key, r1, time, unit);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                } finally {
-                    unLock(key);
-                }
-            });
-        }
+        CACHE_REBUILD_EXECUTOR.submit(() -> rebuildLogicalExpire(key, id, dbFallback, time, unit));
         return shop;
     }
 
@@ -126,19 +117,49 @@ public class CacheClient {
             return null;
         }
 
-        // 3. 查 DB
-        R r = dbFallback.apply(id);
-        if (r == null) {
-            // 空值回填 Redis（2分钟）+ Caffeine（1分钟）
-            stringRedisTemplate.opsForValue().set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
-            caffeineCache.put(key, "");
-            return null;
-        }
+        // 3. 冷 Key 重建时只允许一个请求访问数据库
+        RLock rebuildLock = redissonClient.getLock("lock:cache:rebuild:" + key);
+        boolean locked = false;
+        try {
+            locked = rebuildLock.tryLock(2, 10, TimeUnit.SECONDS);
+            if (!locked) {
+                return dbFallback.apply(id);
+            }
 
-        // 4. 回填两级缓存
-        this.set(key, r, redisTime, unit);
-        caffeineCache.put(key, r);
-        return r;
+            // 双检：等待锁期间其他线程可能已经完成回填
+            caffeineValue = caffeineCache.getIfPresent(key);
+            if (caffeineValue != null) {
+                return "".equals(caffeineValue) ? null : type.cast(caffeineValue);
+            }
+            json = stringRedisTemplate.opsForValue().get(key);
+            if (StrUtil.isNotBlank(json)) {
+                R cached = JSONUtil.toBean(json, type);
+                caffeineCache.put(key, cached);
+                return cached;
+            }
+            if (json != null) {
+                caffeineCache.put(key, "");
+                return null;
+            }
+
+            R r = dbFallback.apply(id);
+            if (r == null) {
+                stringRedisTemplate.opsForValue()
+                        .set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+                caffeineCache.put(key, "");
+                return null;
+            }
+            this.set(key, r, redisTime, unit);
+            caffeineCache.put(key, r);
+            return r;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return dbFallback.apply(id);
+        } finally {
+            if (locked && rebuildLock.isHeldByCurrentThread()) {
+                rebuildLock.unlock();
+            }
+        }
     }
 
     /**
@@ -178,21 +199,12 @@ public class CacheClient {
         }
 
         // 5. 已过期，异步重建
-        String lockKey = RedisConstants.LOCK_SHOP_KEY + id;
-        boolean isLock = tryLock(lockKey);
-        if (isLock) {
-            CACHE_REBUILD_EXECUTOR.submit(() -> {
-                try {
-                    R r1 = dbFallback.apply(id);
-                    this.setWithLogicalExpire(key, r1, time, unit);
-                    caffeineCache.put(key, r1);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                } finally {
-                    unLock(key);
-                }
-            });
-        }
+        CACHE_REBUILD_EXECUTOR.submit(() -> {
+            R rebuilt = rebuildLogicalExpire(key, id, dbFallback, time, unit);
+            if (rebuilt != null) {
+                caffeineCache.put(key, rebuilt);
+            }
+        });
         return result;
     }
 
@@ -206,14 +218,39 @@ public class CacheClient {
         caffeineCache.invalidate(key);
     }
 
-    // ==================== 锁工具 ====================
-
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
-        return BooleanUtil.isTrue(flag);
-    }
-
-    private void unLock(String key) {
-        stringRedisTemplate.delete(key);
+    private <R, ID> R rebuildLogicalExpire(String key, ID id, Function<ID, R> dbFallback,
+                                            Long time, TimeUnit unit) {
+        RLock lock = redissonClient.getLock("lock:cache:logical:" + key);
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(1, 10, TimeUnit.SECONDS);
+            if (!locked) {
+                return null;
+            }
+            String current = stringRedisTemplate.opsForValue().get(key);
+            if (StrUtil.isNotBlank(current)) {
+                RedisData currentData = JSONUtil.toBean(current, RedisData.class);
+                if (currentData.getExpireTime() != null
+                        && currentData.getExpireTime().isAfter(LocalDateTime.now())) {
+                    return null;
+                }
+            }
+            R value = dbFallback.apply(id);
+            if (value == null) {
+                stringRedisTemplate.opsForValue()
+                        .set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+                caffeineCache.put(key, "");
+                return null;
+            }
+            this.setWithLogicalExpire(key, value, time, unit);
+            return value;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 }

@@ -13,9 +13,9 @@ public class QueueConfig {
     //死信交换机名称
     public static final String Y_DEAD_LETTER_EXCHANGE="Y";
     //普通队列名称
-    public static final String QUEUE_A="QA";
+    public static final String QUEUE_A="seckill.order.qa.v2";
     //死信队列名称
-    public static final String DEAD_LETTER_QUEUE_D="QD";
+    public static final String DEAD_LETTER_QUEUE_D="seckill.order.qd.v2";
 
 
     /**
@@ -48,9 +48,6 @@ public class QueueConfig {
         arguments.put("x-dead-letter-exchange",Y_DEAD_LETTER_EXCHANGE);
         //设置死信RoutingKey
         arguments.put("x-dead-letter-routing-key","YD");
-        //设置TTL设置10秒过期
-        arguments.put("x-message-ttl",10000);
-
         return QueueBuilder.durable(QUEUE_A)
                 .withArguments(arguments)
                 .build();

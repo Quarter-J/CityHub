@@ -11,140 +11,111 @@
 
   <div class="page-container">
     <div class="section-title">
-      <h2>🎫 全部优惠券</h2>
+      <h2>全部优惠券</h2>
     </div>
 
     <div class="tabs">
-      <span class="tab-item active" data-type="all" onclick="switchTab(this, 'all')">全部</span>
-      <span class="tab-item" data-type="normal" onclick="switchTab(this, 'normal')">普通券</span>
-      <span class="tab-item" data-type="seckill" onclick="switchTab(this, 'seckill')">秒杀券</span>
-    </div>
-
-    <div class="tabs" style="border-bottom:none;margin-bottom:16px;">
-      <span class="tab-item active" data-shop="all" onclick="switchShop(this, 'all')">全部商铺</span>
+      <span class="tab-item active" onclick="switchTab(this, 'all')">全部</span>
+      <span class="tab-item" onclick="switchTab(this, 'normal')">普通券</span>
+      <span class="tab-item" onclick="switchTab(this, 'seckill')">秒杀券</span>
     </div>
 
     <div id="voucherList" class="voucher-list"></div>
+
+    <div class="pagination" id="pageNav"></div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
-    let allVouchers = []
     let filterType = 'all'
-    let filterShop = 'all'
+    let currentPage = 1
+    let totalPages = 1
 
     function switchTab(el, type) {
-      document.querySelectorAll('.tabs:first-of-type .tab-item').forEach((t) => t.classList.remove('active'))
-      el.classList.add('active')
       filterType = type
-      render()
-    }
-
-    function switchShop(el, shopId) {
-      document.querySelectorAll('.tabs:last-of-type .tab-item').forEach((t) => t.classList.remove('active'))
+      currentPage = 1
+      document.querySelectorAll('.tabs .tab-item').forEach((t) => t.classList.remove('active'))
       el.classList.add('active')
-      filterShop = shopId
-      render()
+      loadVouchers()
     }
 
-    function loadShopTabs() {
-      shopTypeAPI.list().then((res) => {
-        const container = document.querySelector('.tabs:last-of-type')
-        ;(res.data || []).forEach((type) => {
-          container.innerHTML += `<span class="tab-item" data-shop="${type.id}" onclick="switchShop(this, ${type.id})">${type.name}</span>`
-        })
-      }).catch(() => {})
+    function voucherCard(v) {
+      const isSeckill = v.type === 1
+      const gradient = isSeckill
+        ? 'linear-gradient(135deg, var(--primary), var(--secondary))'
+        : 'linear-gradient(135deg, #1890ff, #69c0ff)'
+      return `<div class="voucher-card">
+        <div class="voucher-left" style="background:${gradient}">
+          <div class="v-price">${v.payValue}</div>
+          <div class="v-unit">元</div>
+        </div>
+        <div class="voucher-right">
+          <div class="voucher-title">${v.title}</div>
+          <div class="voucher-desc">${v.subTitle || '超值优惠，限时抢购'}</div>
+          ${v.shopName ? `<div style="font-size:12px;color:var(--text-light);margin:4px 0 8px;">${icon('store')} ${v.shopName}</div>` : ''}
+          <div class="voucher-footer">
+            <span class="${isSeckill ? 'tag-seckill' : 'tag-normal'} tag">${isSeckill ? icon('zap') + ' 秒杀' : '普通券'}</span>
+            ${isSeckill
+              ? `<button class="btn btn-primary btn-sm" onclick="window.location.href='seckill.html?id=${v.id}'">立即抢购</button>`
+              : `<span class="voucher-stock">抵扣 ¥${v.actualValue || 0}</span>`
+            }
+          </div>
+        </div>
+      </div>`
     }
 
-    function loadAllVouchers() {
+    function loadVouchers() {
       const container = document.getElementById('voucherList')
       container.innerHTML = '<div class="loading">加载中</div>'
 
-      const promises = []
-      shopTypeAPI.list().then((res) => {
-        const shops = res.data || []
-        const shopIds = shops.map((s) => s.id)
-        if (!shopIds.length) {
-          render()
-          return
-        }
-        shopIds.forEach((typeId) => {
-          promises.push(
-            shopAPI.byType(typeId, 1, null, null)
-              .then((r) => r.data || [])
-              .catch(() => [])
-          )
+      const typeParam = filterType === 'all' ? null : (filterType === 'seckill' ? 1 : 0)
+
+      voucherAPI.all(typeParam, currentPage)
+        .then((res) => {
+          const list = res.data || []
+          const total = res.total || list.length
+          totalPages = Math.max(1, Math.ceil(total / 10))
+
+          if (!list.length) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('ticket')}</div><p>暂无优惠券</p></div>`
+            renderPageNav()
+            return
+          }
+
+          container.innerHTML = list.map(voucherCard).join('')
+          renderPageNav()
         })
-        Promise.all(promises).then((results) => {
-          const allShops = results.flat()
-          const ids = [...new Set(allShops.map((s) => s.id))]
-          const voucherPromises = ids.map((sid) =>
-            voucherAPI.listByShop(sid)
-              .then((r) => (r.data || []).map((v) => ({ ...v, shopId: sid })))
-              .catch(() => [])
-          )
-          Promise.all(voucherPromises).then((vResults) => {
-            allVouchers = vResults.flat()
-            render()
-          })
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><p>${err.message || '加载失败'}</p></div>`
+          renderPageNav()
         })
-      }).catch(() => {
-        render()
-      })
     }
 
-    function render() {
-      const container = document.getElementById('voucherList')
-      let list = allVouchers
-
-      if (filterType === 'normal') list = list.filter((v) => v.type === 0)
-      else if (filterType === 'seckill') list = list.filter((v) => v.type === 1)
-
-      if (filterShop !== 'all') {
-        shopAPI.byType(filterShop, 1, null, null)
-          .then((r) => {
-            const shopIds = (r.data || []).map((s) => s.id)
-            list = list.filter((v) => shopIds.includes(v.shopId))
-            renderList(list, container)
-          })
-          .catch(() => renderList(list, container))
-      } else {
-        renderList(list, container)
-      }
-    }
-
-    function renderList(list, container) {
-      if (!list.length) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🎫</div><p>暂无优惠券</p></div>'
+    function renderPageNav() {
+      const container = document.getElementById('pageNav')
+      if (totalPages <= 1) {
+        container.innerHTML = ''
         return
       }
+      let html = `<button class="btn btn-outline btn-sm" ${currentPage === 1 ? 'disabled' : ''} onclick="goPage(${currentPage - 1})">上一页</button>`
+      for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="btn ${i === currentPage ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="goPage(${i})">${i}</button>`
+      }
+      html += `<button class="btn btn-outline btn-sm" ${currentPage === totalPages ? 'disabled' : ''} onclick="goPage(${currentPage + 1})">下一页</button>`
+      container.innerHTML = html
+    }
 
-      container.innerHTML = list.map((v) => {
-        const isSeckill = v.type === 1
-        return `<div class="voucher-card">
-          <div class="voucher-left" style="background:${isSeckill ? 'linear-gradient(135deg, #ff4d4f, #ff7a45)' : 'linear-gradient(135deg, #1890ff, #69c0ff)'}">
-            <div class="v-price">${v.payValue}</div>
-            <div class="v-unit">元</div>
-          </div>
-          <div class="voucher-right">
-            <div class="voucher-title">${v.title}</div>
-            <div class="voucher-desc">${v.subTitle || '超值优惠，限时抢购'}</div>
-            <div class="voucher-footer">
-              <span class="${isSeckill ? 'tag-seckill' : 'tag-normal'} tag">${isSeckill ? '⚡ 秒杀' : '普通券'}</span>
-              ${isSeckill
-                ? `<button class="btn btn-primary btn-sm" onclick="window.location.href='seckill.html?id=${v.id}'">立即抢购</button>`
-                : `<span class="voucher-stock">满${v.condition || 0}元可用</span>`
-              }
-            </div>
-          </div>
-        </div>`
-      }).join('')
+    function goPage(page) {
+      if (page < 1 || page > totalPages) return
+      currentPage = page
+      loadVouchers()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     function init() {
       renderHeader()
-      loadShopTabs()
-      loadAllVouchers()
+      loadVouchers()
     }
 
     init()

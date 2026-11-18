@@ -11,14 +11,18 @@
 
   <div class="page-container">
     <div class="section-title">
-      <h2>🔥 热门笔记</h2>
+      <h2>热门笔记</h2>
     </div>
 
     <div id="blogList" class="blog-list"></div>
 
-    <div class="pagination" id="pagination"></div>
+    <div class="pagination" id="pageNav"></div>
   </div>
 
+  <!-- 发布按钮 -->
+  <button class="fab" id="publishFab" onclick="openPublish()" style="display:none;" aria-label="发布笔记"><span data-icon="edit"></span></button>
+
+  <!-- 发布弹窗 -->
   <div class="modal-overlay" id="publishModal" style="display:none;" onclick="if(event.target===this)closePublish()">
     <div class="modal-content">
       <div class="modal-title">发布笔记</div>
@@ -37,7 +41,7 @@
       <div class="form-group">
         <label>上传图片</label>
         <input type="file" id="blogImages" class="form-control" accept="image/*" multiple onchange="previewImages()">
-        <div id="imagePreview" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;"></div>
+        <div id="imagePreview" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"></div>
       </div>
       <div class="modal-actions">
         <button class="btn btn-outline" onclick="closePublish()">取消</button>
@@ -46,9 +50,11 @@
     </div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     let currentPage = 1
+    let totalPages = 1
     let uploadedImages = []
 
     function loadBlogs() {
@@ -58,8 +64,11 @@
       blogAPI.hot(currentPage)
         .then((res) => {
           const blogs = res.data || []
+          const total = res.total || blogs.length
+          totalPages = Math.max(1, Math.ceil(total / 10))
           if (!blogs.length) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><p>暂无笔记</p></div>'
+            container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('file')}</div><p>暂无笔记</p></div>`
+            renderPageNav()
             return
           }
 
@@ -77,23 +86,46 @@
                   <div class="blog-time">${formatTime(blog.createTime)}</div>
                 </div>
               </div>
-              <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'" style="cursor:pointer;">${blog.title}</div>
+              <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'">${blog.title}</div>
               <div class="blog-content">${blog.content}</div>
               ${imgHtml}
               <div class="blog-actions">
-                <span class="blog-action ${blog.isLike ? 'liked' : ''}" onclick="toggleLike(${blog.id}, this)">
-                  ${blog.isLike ? '❤' : '🤍'} <span class="like-count">${blog.liked || 0}</span>
+                <span aria-label="点赞" class="blog-action ${blog.isLike ? 'liked' : ''}" onclick="toggleLike(${blog.id}, this)">
+                  ${icon('heart')} <span class="like-count">${blog.liked || 0}</span>
                 </span>
-                <span class="blog-action" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
-                  💬 ${blog.comments || 0}
+                <span aria-label="评论" class="blog-action" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+                  ${icon('message')} ${blog.comments || 0}
                 </span>
               </div>
             </div>`
           }).join('')
+          renderPageNav()
         })
         .catch((err) => {
           container.innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+          renderPageNav()
         })
+    }
+
+    function renderPageNav() {
+      const container = document.getElementById('pageNav')
+      if (totalPages <= 1) {
+        container.innerHTML = ''
+        return
+      }
+      let html = `<button class="btn btn-outline btn-sm" ${currentPage === 1 ? 'disabled' : ''} onclick="goPage(${currentPage - 1})">上一页</button>`
+      for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="btn ${i === currentPage ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="goPage(${i})">${i}</button>`
+      }
+      html += `<button class="btn btn-outline btn-sm" ${currentPage === totalPages ? 'disabled' : ''} onclick="goPage(${currentPage + 1})">下一页</button>`
+      container.innerHTML = html
+    }
+
+    function goPage(page) {
+      if (page < 1 || page > totalPages) return
+      currentPage = page
+      loadBlogs()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     function toggleLike(blogId, el) {
@@ -104,10 +136,10 @@
           const isLiked = el.classList.contains('liked')
           if (isLiked) {
             el.classList.remove('liked')
-            el.innerHTML = `🤍 <span class="like-count">${parseInt(countEl.textContent) - 1}</span>`
+            el.innerHTML = `${icon('heart')} <span class="like-count">${parseInt(countEl.textContent) - 1}</span>`
           } else {
             el.classList.add('liked')
-            el.innerHTML = `❤ <span class="like-count">${parseInt(countEl.textContent) + 1}</span>`
+            el.innerHTML = `${icon('heart')} <span class="like-count">${parseInt(countEl.textContent) + 1}</span>`
           }
         })
         .catch((err) => showToast(err.message, 'error'))
@@ -139,7 +171,8 @@
           img.style.width = '80px'
           img.style.height = '80px'
           img.style.objectFit = 'cover'
-          img.style.borderRadius = '4px'
+          img.style.borderRadius = '8px'
+          img.style.border = '1px solid var(--border)'
           preview.appendChild(img)
         }
         reader.readAsDataURL(file)
@@ -184,13 +217,8 @@
     function init() {
       renderHeader()
       loadBlogs()
-
-      const user = getUser()
-      const pagination = document.getElementById('pagination')
-      if (user) {
-        pagination.innerHTML = `
-          <button class="btn btn-primary" onclick="openPublish()" style="border-radius:8px;">✏️ 发布笔记</button>
-        `
+      if (getUser()) {
+        document.getElementById('publishFab').style.display = 'flex'
       }
     }
 

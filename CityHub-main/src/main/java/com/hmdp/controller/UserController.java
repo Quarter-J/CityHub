@@ -18,6 +18,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 
 /**
@@ -64,9 +65,8 @@ public class UserController {
      * @return 无
      */
     @PostMapping("/logout")
-    public Result logout(){
-        UserHolder.removeUser();
-        return Result.fail("功能未完成");
+    public Result logout(HttpServletRequest request){
+        return userService.logout(request.getHeader("authorization"));
     }
 
     @GetMapping("/me")
@@ -101,6 +101,26 @@ public class UserController {
     }
 
     /**
+     * 修改当前用户的昵称、头像
+     * @param user 新的昵称、头像
+     * @return 无
+     */
+    @PutMapping("/update")
+    public Result updateUser(@RequestBody User user, HttpServletRequest request){
+        return userService.updateUser(user, request.getHeader("authorization"));
+    }
+
+    /**
+     * 修改当前用户的个人资料（城市、简介、性别、生日）
+     * @param userInfo 新的资料
+     * @return 无
+     */
+    @PutMapping("/info")
+    public Result updateUserInfo(@RequestBody UserInfo userInfo){
+        return userService.updateUserInfo(userInfo);
+    }
+
+    /**
      * 签到功能
      * @return
      */
@@ -116,5 +136,14 @@ public class UserController {
     @GetMapping("/sign/count")
     public Result signCount(){
         return userService.signCount();
+    }
+
+    /**
+     * 查询今日是否已签到
+     * @return data 为 true 表示今日已签到
+     */
+    @GetMapping("/sign/status")
+    public Result signStatus(){
+        return userService.signStatus();
     }
 }

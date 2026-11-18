@@ -15,6 +15,7 @@
     </div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     const voucherId = new URLSearchParams(window.location.search).get('id')
@@ -24,24 +25,23 @@
 
     function loadSeckill() {
       if (!voucherId) {
-        document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>秒杀券ID不存在</p></div>'
+        document.getElementById('seckillContent').innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('alert')}</div><p>秒杀券ID不存在</p></div>`
         return
       }
 
       document.getElementById('seckillContent').innerHTML = '<div class="loading">加载中</div>'
 
-      voucherAPI.listByShop(0)
+      voucherAPI.detail(voucherId)
         .then((res) => {
-          const all = res.data || []
-          seckillData = all.find((v) => String(v.id) === voucherId)
+          seckillData = res.data
           if (!seckillData) {
-            document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>秒杀券不存在或已下架</p></div>'
+            document.getElementById('seckillContent').innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('alert')}</div><p>秒杀券不存在或已下架</p></div>`
             return
           }
           renderSeckill()
         })
         .catch(() => {
-          document.getElementById('seckillContent').innerHTML = '<div class="empty-state"><div class="empty-icon">😵</div><p>加载失败</p></div>'
+          document.getElementById('seckillContent').innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('alert')}</div><p>加载失败</p></div>`
         })
     }
 
@@ -60,12 +60,12 @@
           <div class="timer-display" id="timerDisplay">--:--:--</div>
         </div>`
       } else if (now >= begin && now <= end) {
-        statusHtml = `<div class="seckill-timer" style="background:linear-gradient(135deg, #ff4d4f, #ff7a45);">
-          <div class="timer-label">⚡ 秒杀进行中</div>
-          <div class="timer-display" style="font-size:24px;">剩余 ${formatTimeRemaining(end - now)}</div>
+        statusHtml = `<div class="seckill-timer">
+          <div class="timer-label">${icon('zap')} 秒杀进行中</div>
+          <div class="timer-display" id="timerDisplay" style="font-size:24px;letter-spacing:2px;">${formatTimeRemaining(end - now)}</div>
         </div>`
       } else {
-        statusHtml = `<div class="seckill-timer" style="background:linear-gradient(135deg, #999, #666);">
+        statusHtml = `<div class="seckill-timer" style="background:linear-gradient(135deg, #9aa0aa, #5f6570);box-shadow:none;">
           <div class="timer-label">秒杀已结束</div>
         </div>`
       }
@@ -74,24 +74,25 @@
         ${statusHtml}
 
         <div class="card">
-          <div class="card-body" style="text-align:center;padding:32px;">
-            <div style="font-size:48px;font-weight:700;color:var(--primary);">¥${v.payValue}</div>
-            <div style="font-size:20px;font-weight:600;margin:12px 0;">${v.title}</div>
-            <div style="color:var(--text-light);margin-bottom:12px;">${v.subTitle || ''}</div>
+          <div class="card-body" style="text-align:center;padding:40px 32px;">
+            <div style="font-size:52px;font-weight:800;color:var(--primary);letter-spacing:-2px;line-height:1;">¥${v.payValue}</div>
+            <div style="font-size:20px;font-weight:700;margin:16px 0 6px;">${v.title}</div>
+            <div style="color:var(--text-light);margin-bottom:16px;">${v.subTitle || ''}</div>
 
-            <div style="display:flex;justify-content:center;gap:32px;margin:20px 0;">
+            <div style="display:flex;justify-content:center;gap:48px;margin:24px 0;">
               <div>
-                <div style="font-size:24px;font-weight:700;color:var(--text);">${v.stock ?? '--'}</div>
-                <div style="font-size:12px;color:var(--text-light);">剩余库存</div>
+                <div style="font-size:26px;font-weight:700;">${v.stock ?? '--'}</div>
+                <div style="font-size:12px;color:var(--text-light);margin-top:4px;">剩余库存</div>
               </div>
+              <div style="width:1px;background:var(--border);"></div>
               <div>
-                <div style="font-size:24px;font-weight:700;color:var(--secondary);">¥${v.value}</div>
-                <div style="font-size:12px;color:var(--text-light);">原价</div>
+                <div style="font-size:26px;font-weight:700;color:var(--secondary);">¥${v.actualValue}</div>
+                <div style="font-size:12px;color:var(--text-light);margin-top:4px;">原价</div>
               </div>
             </div>
 
-            <button class="btn btn-primary btn-lg" id="seckillBtn" onclick="doSeckill()" 
-                    style="border-radius:8px;${now > end ? 'opacity:0.3;cursor:not-allowed;' : ''}"
+            <button class="btn btn-primary btn-lg" id="seckillBtn" onclick="doSeckill()"
+                    style="min-width:200px;${now > end ? 'opacity:0.4;cursor:not-allowed;' : ''}"
                     ${now > end ? 'disabled' : ''}>
               ${now < begin ? '等待开始' : now > end ? '已结束' : '立即抢购'}
             </button>
@@ -141,7 +142,7 @@
 
       seckillAPI.order(voucherId)
         .then((res) => {
-          showToast('抢购成功！订单已生成', 'success')
+          showToast('抢购成功，订单正在异步生成', 'success')
           btn.textContent = '已抢购'
         })
         .catch((err) => {

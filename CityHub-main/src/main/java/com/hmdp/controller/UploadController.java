@@ -25,7 +25,7 @@ public class UploadController {
             // 生成新文件名
             String fileName = createNewFileName(originalFilename);
             // 保存文件
-            image.transferTo(new File(SystemConstants.IMAGE_UPLOAD_DIR, fileName));
+            image.transferTo(resolveStorageFile(fileName));
             // 返回结果
             log.debug("文件上传成功，{}", fileName);
             return Result.ok(fileName);
@@ -34,9 +34,36 @@ public class UploadController {
         }
     }
 
+    @PostMapping("avatar")
+    public Result uploadAvatar(@RequestParam("file") MultipartFile image) {
+        try {
+            // 获取原始文件名称
+            String originalFilename = image.getOriginalFilename();
+            // 生成新文件名
+            String suffix = StrUtil.subAfter(originalFilename, ".", true);
+            String name = UUID.randomUUID().toString();
+            // 保存到头像目录
+            File dir = resolveStorageFile("avatars");
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            String fileName = StrUtil.format("/avatars/{}.{}", name, suffix);
+            image.transferTo(resolveStorageFile(fileName));
+            log.debug("头像上传成功，{}", fileName);
+            return Result.ok(fileName);
+        } catch (IOException e) {
+            throw new RuntimeException("头像上传失败", e);
+        }
+    }
+
     @GetMapping("/blog/delete")
     public Result deleteBlogImg(@RequestParam("name") String filename) {
-        File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
+        File file;
+        try {
+            file = resolveStorageFile(filename);
+        } catch (IOException | IllegalArgumentException e) {
+            return Result.fail("错误的文件名称");
+        }
         if (file.isDirectory()) {
             return Result.fail("错误的文件名称");
         }
@@ -59,6 +86,20 @@ public class UploadController {
         }
         // 生成文件名
         return StrUtil.format("/blogs/{}/{}/{}.{}", d1, d2, name, suffix);
+    }
+
+    private File resolveStorageFile(String filename) throws IOException {
+        if (StrUtil.isBlank(filename)) {
+            throw new IllegalArgumentException("文件路径不能为空");
+        }
+        File root = new File(SystemConstants.IMAGE_UPLOAD_DIR).getCanonicalFile();
+        String relative = StrUtil.removePrefix(filename, "/").replace("\\", "/");
+        File target = new File(root, relative).getCanonicalFile();
+        String rootPath = root.getPath() + File.separator;
+        if (!target.getPath().equals(root.getPath()) && !target.getPath().startsWith(rootPath)) {
+            throw new IllegalArgumentException("文件路径越界");
+        }
+        return target;
     }
 
 }
