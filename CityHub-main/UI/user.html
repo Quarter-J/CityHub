@@ -14,17 +14,44 @@
       <div class="user-profile" id="userProfile"></div>
     </div>
 
-    <div class="tabs" style="margin-top:20px;">
-      <span class="tab-item active" data-tab="blogs" onclick="switchTab(this, 'blogs')">📝 笔记</span>
-      <span class="tab-item" data-tab="liked" onclick="switchTab(this, 'liked')">❤️ 点赞</span>
-      <span class="tab-item" data-tab="follow" onclick="switchTab(this, 'follow')">👥 关注</span>
-    </div>
+    <div class="tabs" style="margin-top:20px;" id="tabs"></div>
 
     <div id="tabContent">
       <div class="loading">加载中</div>
     </div>
   </div>
 
+  <!-- 编辑资料弹窗 -->
+  <div class="modal-overlay" id="editModal" style="display:none;" onclick="if(event.target===this)closeEdit()">
+    <div class="modal-content">
+      <div class="modal-title">编辑资料</div>
+      <div class="form-group">
+        <label>昵称</label>
+        <input type="text" id="editNickName" class="form-control" placeholder="输入昵称">
+      </div>
+      <div class="form-group">
+        <label>头像</label>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <img id="avatarPreview" src="https://via.placeholder.com/80x80" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;">
+          <input type="file" id="editIconFile" class="form-control" accept="image/*" onchange="previewAvatar(this)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>城市</label>
+        <input type="text" id="editCity" class="form-control" placeholder="所在城市">
+      </div>
+      <div class="form-group">
+        <label>个人简介</label>
+        <textarea id="editIntroduce" class="form-control" rows="3" placeholder="介绍一下自己（不超过128字）"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeEdit()">取消</button>
+        <button class="btn btn-primary" onclick="saveEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     const targetUserId = new URLSearchParams(window.location.search).get('id')
@@ -32,10 +59,23 @@
     const viewingUserId = targetUserId || (getUser() ? getUser().id : null)
     let currentTab = 'blogs'
 
-    function switchTab(el, tab) {
-      document.querySelectorAll('.tabs .tab-item').forEach((t) => t.classList.remove('active'))
-      el.classList.add('active')
+    const allTabs = [
+      { key: 'blogs', label: '笔记' },
+      { key: 'liked', label: '点赞', myOnly: true },
+      { key: 'follow', label: '关注' },
+      { key: 'fans', label: '粉丝' },
+    ]
+    const tabs = isMyPage ? allTabs : allTabs.filter((t) => !t.myOnly)
+
+    function renderTabs() {
+      document.getElementById('tabs').innerHTML = tabs.map((t) =>
+        `<span class="tab-item ${t.key === currentTab ? 'active' : ''}" onclick="switchTab('${t.key}')">${t.label}</span>`
+      ).join('')
+    }
+
+    function switchTab(tab) {
       currentTab = tab
+      renderTabs()
       loadTabContent()
     }
 
@@ -43,7 +83,7 @@
       const container = document.getElementById('userProfile')
 
       if (!viewingUserId) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><p>请先登录</p><a href="login.html" class="btn btn-primary" style="margin-top:12px;">去登录</a></div>'
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('user')}</div><p>请先登录</p><a href="login.html" class="btn btn-primary" style="margin-top:12px;">去登录</a></div>`
         return
       }
 
@@ -55,34 +95,37 @@
           const user = userRes.data
           const info = infoRes.data
 
-          const isFollow = isMyPage ? false : true
+          const actions = isMyPage
+            ? `<button class="btn btn-outline" onclick="openEdit()">${icon('edit')} 编辑资料</button>
+               <button class="btn btn-primary" id="signBtn" onclick="doSign()" style="margin-left:8px;">${icon('calendar')} 签到</button>`
+            : (getUser()
+                ? `<button class="btn btn-outline" id="followBtn" onclick="toggleFollow()">关注</button>
+                   <button class="btn btn-outline" style="margin-left:8px;" onclick="window.location.href='follow.html?id=${viewingUserId}'">共同关注</button>`
+                : '')
+
           container.innerHTML = `
             <img class="user-avatar" src="${user ? user.icon || 'https://via.placeholder.com/80x80' : 'https://via.placeholder.com/80x80'}" alt="">
             <div class="user-name">${user ? user.nickName || '用户' : '未知用户'}</div>
             <div class="user-desc">${info ? info.introduce || '这个人很懒，什么都没留下~' : ''}</div>
             <div class="user-stats">
-              <div class="stat-item">
+              <div class="stat-item" onclick="switchTab('follow')">
                 <div class="stat-num">${info ? info.followee || 0 : 0}</div>
                 <div class="stat-label">关注</div>
               </div>
-              <div class="stat-item">
+              <div class="stat-item" onclick="switchTab('fans')">
                 <div class="stat-num">${info ? info.fans || 0 : 0}</div>
                 <div class="stat-label">粉丝</div>
               </div>
-              <div class="stat-item">
+              <div class="stat-item" onclick="switchTab('blogs')">
                 <div class="stat-num" id="blogCountStat">0</div>
                 <div class="stat-label">笔记</div>
               </div>
             </div>
-            ${!isMyPage && getUser()
-              ? `<button class="btn btn-outline" id="followBtn" onclick="toggleFollow()">关注</button>
-                 <button class="btn btn-outline" style="margin-left:8px;" onclick="window.location.href='follow.html?id=${viewingUserId}'">共同关注</button>`
-              : isMyPage
-                ? `<a href="follow.html" class="btn btn-outline">我的关注</a>`
-                : ''
-            }
+            ${isMyPage ? `<div id="signInfo" style="margin-top:10px;font-size:13px;color:var(--text-light);"></div>` : ''}
+            <div style="margin-top:16px;">${actions}</div>
           `
 
+          if (isMyPage) { loadSignInfo(); loadSignStatus(); }
           if (!isMyPage && getUser()) {
             followAPI.isFollow(viewingUserId)
               .then((r) => {
@@ -93,7 +136,6 @@
                   btn.classList.add('btn-primary')
                   btn.dataset.followed = 'true'
                 } else {
-                  btn.textContent = '关注'
                   btn.dataset.followed = 'false'
                 }
               })
@@ -103,6 +145,115 @@
         .catch(() => {
           container.innerHTML = '<div class="empty-state"><p>用户信息加载失败</p></div>'
         })
+    }
+
+    function markSigned() {
+      const btn = document.getElementById('signBtn')
+      if (btn) {
+        btn.innerHTML = `${icon('check')} 已签到`
+        btn.classList.remove('btn-primary')
+        btn.classList.add('btn-outline')
+        btn.disabled = true
+      }
+    }
+
+    function loadSignInfo() {
+      userAPI.signCount()
+        .then((res) => {
+          const days = res.data || 0
+          document.getElementById('signInfo').textContent = `已连续签到 ${days} 天`
+        })
+        .catch(() => {})
+    }
+
+    function loadSignStatus() {
+      userAPI.signStatus()
+        .then((res) => {
+          if (res.data) markSigned()
+        })
+        .catch(() => {})
+    }
+
+    function doSign() {
+      if (!requireAuth()) return
+      userAPI.sign()
+        .then(() => {
+          showToast('签到成功！', 'success')
+          loadSignInfo()
+          markSigned()
+        })
+        .catch((err) => showToast(err.message || '签到失败', 'error'))
+    }
+
+    function openEdit() {
+      const user = getUser()
+      document.getElementById('editNickName').value = user ? (user.nickName || '') : ''
+      // 重置头像文件输入，预览显示当前头像
+      const fileInput = document.getElementById('editIconFile')
+      if (fileInput) fileInput.value = ''
+      const preview = document.getElementById('avatarPreview')
+      if (preview) preview.src = user ? (user.icon || 'https://via.placeholder.com/80x80') : 'https://via.placeholder.com/80x80'
+      userAPI.info(viewingUserId)
+        .then((res) => {
+          const info = res.data || {}
+          document.getElementById('editCity').value = info.city || ''
+          document.getElementById('editIntroduce').value = info.introduce || ''
+        })
+        .catch(() => {})
+      document.getElementById('editModal').style.display = 'flex'
+    }
+
+    function previewAvatar(input) {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const preview = document.getElementById('avatarPreview')
+        if (preview) preview.src = e.target.result
+      }
+      reader.readAsDataURL(file)
+    }
+
+    function closeEdit() {
+      document.getElementById('editModal').style.display = 'none'
+    }
+
+    function saveEdit() {
+      const nickName = document.getElementById('editNickName').value.trim()
+      const city = document.getElementById('editCity').value.trim()
+      const introduce = document.getElementById('editIntroduce').value.trim()
+      const fileInput = document.getElementById('editIconFile')
+      const file = fileInput && fileInput.files[0]
+
+      // 若有选择头像文件，先上传拿到可访问的 URL
+      const uploadPromise = file
+        ? uploadAPI.avatar(file).then((r) => {
+            if (!r.success) throw new Error(r.errorMsg || '头像上传失败')
+            return r.data ? `${API_BASE}/uploads${r.data}` : ''
+          })
+        : Promise.resolve('')
+
+      uploadPromise
+        .then((icon) => {
+          const userPromise = (nickName || icon)
+            ? userAPI.update({ nickName, icon })
+            : Promise.resolve()
+          const infoPromise = userAPI.updateInfo({ city, introduce })
+          return Promise.all([userPromise, infoPromise]).then(() => icon)
+        })
+        .then((icon) => {
+          showToast('保存成功', 'success')
+          closeEdit()
+          const u = getUser()
+          if (u) {
+            if (nickName) u.nickName = nickName
+            if (icon) u.icon = icon
+            setUser(u)
+          }
+          loadProfile()
+          renderHeader()
+        })
+        .catch((err) => showToast(err.message || '保存失败', 'error'))
     }
 
     function toggleFollow() {
@@ -125,8 +276,43 @@
             btn.dataset.followed = 'true'
             showToast('关注成功', 'success')
           }
+          // 刷新个人资料，同步更新关注数/粉丝数
+          loadProfile()
         })
         .catch((err) => showToast(err.message, 'error'))
+    }
+
+    function blogCard(blog) {
+      return `<div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
+        <div class="blog-header">
+          <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+          <div>
+            <div class="blog-user">${blog.name || '匿名'}</div>
+            <div class="blog-time">${formatTime(blog.createTime)}</div>
+          </div>
+        </div>
+        <div class="blog-title">${blog.title}</div>
+        <div class="blog-content">${blog.content}</div>
+        <div class="blog-actions">
+          <span aria-label="点赞" class="blog-action ${blog.isLike ? 'liked' : ''}">${icon('heart')} ${blog.liked || 0}</span>
+          <span aria-label="评论" class="blog-action">${icon('message')} ${blog.comments || 0}</span>
+          <span class="blog-action" style="margin-left:auto;">${formatTime(blog.createTime)}</span>
+        </div>
+      </div>`
+    }
+
+    function userGrid(users, emptyText) {
+      if (!users.length) {
+        return `<div class="empty-state"><div class="empty-icon">${icon('users')}</div><p>${emptyText}</p></div>`
+      }
+      return `<div class="user-grid">
+        ${users.map((u) => `
+          <div class="user-cell" onclick="window.location.href='user.html?id=${u.id}'">
+            <img src="${u.icon || 'https://via.placeholder.com/60x60'}">
+            <div class="user-cell-name">${u.nickName || '用户'}</div>
+          </div>
+        `).join('')}
+      </div>`
     }
 
     function loadTabContent() {
@@ -134,61 +320,57 @@
       container.innerHTML = '<div class="loading">加载中</div>'
 
       if (currentTab === 'blogs') {
-        const apiCall = isMyPage ? blogAPI.my(1) : (viewingUserId ? blogAPI.byUser(viewingUserId, 1) : Promise.reject())
-        apiCall
+        blogAPI.byUser(viewingUserId, 1)
           .then((res) => {
             const blogs = res.data || []
-            document.getElementById('blogCountStat').textContent = blogs.length
-            if (!blogs.length) {
-              container.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><p>暂无笔记</p></div>'
-              return
-            }
-            container.innerHTML = '<div class="blog-list">' + blogs.map((blog) => {
-              return `<div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
-                <div class="blog-title">${blog.title}</div>
-                <div class="blog-content">${blog.content}</div>
-                <div class="blog-actions">
-                  <span class="blog-action">❤ ${blog.liked || 0}</span>
-                  <span class="blog-action">💬 ${blog.comments || 0}</span>
-                  <span class="blog-action" style="margin-left:auto;">${formatTime(blog.createTime)}</span>
-                </div>
-              </div>`
-            }).join('') + '</div>'
+            const stat = document.getElementById('blogCountStat')
+            if (stat) stat.textContent = res.total != null ? res.total : blogs.length
+            container.innerHTML = blogs.length
+              ? '<div class="blog-list">' + blogs.map(blogCard).join('') + '</div>'
+              : `<div class="empty-state"><div class="empty-icon">${icon('file')}</div><p>暂无笔记</p></div>`
           })
           .catch(() => {
             container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'
           })
       } else if (currentTab === 'liked') {
-        blogAPI.hot(1)
+        if (!isMyPage) {
+          container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('lock')}</div><p>对方点赞的笔记仅自己可见</p></div>`
+          return
+        }
+        blogAPI.ofLiked(1)
           .then((res) => {
-            const blogs = (res.data || []).filter((b) => b.isLike)
+            const blogs = res.data || []
             container.innerHTML = blogs.length
-              ? '<div class="blog-list">' + blogs.map((blog) => `
-                  <div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
-                    <div class="blog-header">
-                      <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
-                      <div>
-                        <div class="blog-user">${blog.name || '匿名'}</div>
-                        <div class="blog-time">${formatTime(blog.createTime)}</div>
-                      </div>
-                    </div>
-                    <div class="blog-title">${blog.title}</div>
-                    <div class="blog-content">${blog.content}</div>
-                    <div class="blog-actions">
-                      <span class="blog-action liked">❤ ${blog.liked || 0}</span>
-                    </div>
-                  </div>
-                `).join('') + '</div>'
-              : '<div class="empty-state"><div class="empty-icon">❤️</div><p>暂无点赞</p></div>'
+              ? '<div class="blog-list">' + blogs.map(blogCard).join('') + '</div>'
+              : `<div class="empty-state"><div class="empty-icon">${icon('heart')}</div><p>还没有点过赞的笔记</p></div>`
           })
-          .catch(() => {})
+          .catch(() => {
+            container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'
+          })
       } else if (currentTab === 'follow') {
-        container.innerHTML = '<iframe src="follow.html" style="width:100%;border:none;min-height:400px;" onload="this.style.height=this.contentWindow.document.body.scrollHeight+\'px\'"></iframe>'
+        const apiCall = isMyPage ? followAPI.ofMe() : followAPI.fans(viewingUserId)
+        const emptyText = isMyPage ? '还没有关注任何人' : 'TA 还没有关注任何人'
+        apiCall
+          .then((res) => {
+            container.innerHTML = userGrid(res.data || [], emptyText)
+          })
+          .catch(() => {
+            container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'
+          })
+      } else if (currentTab === 'fans') {
+        followAPI.fans(viewingUserId)
+          .then((res) => {
+            container.innerHTML = userGrid(res.data || [], '还没有粉丝')
+          })
+          .catch(() => {
+            container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'
+          })
       }
     }
 
     function init() {
       renderHeader()
+      renderTabs()
       loadProfile()
       loadTabContent()
     }

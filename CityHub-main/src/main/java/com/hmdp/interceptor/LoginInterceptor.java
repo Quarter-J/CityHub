@@ -1,35 +1,46 @@
 package com.hmdp.interceptor;
 
-import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.util.StrUtil;
-import com.hmdp.dto.UserDTO;
-import com.hmdp.entity.User;
-import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.UserHolder;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
-import org.springframework.web.servlet.ModelAndView;
 
-import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 public class LoginInterceptor implements HandlerInterceptor {
+
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-       //1.判断是否需要拦截（ThreadLocal）中是否有用户
-        if(UserHolder.getUser()==null){
-            //没有需要拦截，设置状态码
-            response.setStatus(401);
-            //拦截
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if (UserHolder.getUser() != null || isPublicRequest(request)) {
+            return true;
+        }
+        response.setStatus(401);
+        return false;
+    }
+
+    private boolean isPublicRequest(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String method = request.getMethod();
+        if ("OPTIONS".equalsIgnoreCase(method) || path.startsWith("/uploads/")) {
+            return true;
+        }
+        if ("POST".equalsIgnoreCase(method)) {
+            return "/user/login".equals(path) || "/user/code".equals(path);
+        }
+        if (!"GET".equalsIgnoreCase(method)) {
             return false;
         }
-        //由用户放行
-        return true;
+
+        return "/user/me".equals(path)
+                || path.startsWith("/user/info/")
+                || path.matches("/user/\\d+")
+                || path.startsWith("/shop/")
+                || "/shop-type/list".equals(path)
+                || path.startsWith("/voucher/")
+                || "/blog/hot".equals(path)
+                || path.matches("/blog/\\d+")
+                || path.matches("/blog/likes/\\d+")
+                || "/blog/of/user".equals(path)
+                || "/blog/of/shop".equals(path)
+                || path.startsWith("/blog-comments/of/blog/");
     }
 }

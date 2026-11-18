@@ -7,24 +7,17 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header class="app-header">
-    <div class="header-inner">
-      <a href="index.html" class="logo">City<span>Hub</span></a>
-      <div class="search-box">
-        <input type="text" id="searchInput" placeholder="搜索商家..." onkeydown="if(event.key==='Enter') searchShop()">
-        <span class="search-icon" onclick="searchShop()">🔍</span>
-      </div>
-      <div class="header-actions" id="headerActions"></div>
-    </div>
-  </header>
+  <header class="app-header"></header>
 
   <div class="page-container">
-    <div class="card" style="margin-bottom:20px;">
+    <!-- 分类导航 -->
+    <div class="card" style="margin-bottom:24px;">
       <div class="card-body">
         <div class="shop-type-nav" id="typeNav"></div>
       </div>
     </div>
 
+    <!-- 商家列表 -->
     <div class="section-title">
       <h2 id="sectionTitle">推荐商家</h2>
       <span class="more" id="resultCount"></span>
@@ -34,15 +27,17 @@
 
     <div class="pagination" id="pagination"></div>
 
-    <div style="margin-top:40px;">
+    <!-- 热门笔记 -->
+    <div style="margin-top:48px;">
       <div class="section-title">
-        <h2>🔥 热门笔记</h2>
-        <a href="blog.html" class="more">查看更多 →</a>
+        <h2>热门笔记</h2>
+        <a href="blog.html" class="more">查看更多 <span data-icon="arrow-right"></span></a>
       </div>
       <div id="hotBlogs" class="blog-list"></div>
     </div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     let currentType = null
@@ -50,23 +45,17 @@
     let totalPages = 1
     let searchKeyword = ''
 
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('search')) {
-      searchKeyword = params.get('search')
-      document.getElementById('searchInput').value = searchKeyword
-    }
-
     function loadShopTypes() {
       shopTypeAPI.list()
         .then((res) => {
           const nav = document.getElementById('typeNav')
           nav.innerHTML = `<div class="shop-type-item ${!currentType && !searchKeyword ? 'active' : ''}" onclick="filterByType(null)">
-            <span class="type-icon">🏠</span>
+            <span class="type-icon">${icon('home')}</span>
             <span class="type-name">全部</span>
           </div>`
           res.data.forEach((type) => {
             nav.innerHTML += `<div class="shop-type-item ${currentType === type.id ? 'active' : ''}" onclick="filterByType(${type.id})">
-              <span class="type-icon">${type.icon || '🏪'}</span>
+              <span class="type-icon">${shopTypeIcon(type)}</span>
               <span class="type-name">${type.name}</span>
             </div>`
           })
@@ -78,7 +67,8 @@
       currentType = typeId
       currentPage = 1
       searchKeyword = ''
-      document.getElementById('searchInput').value = ''
+      const input = document.getElementById('searchInput')
+      if (input) input.value = ''
       loadShops()
       loadShopTypes()
     }
@@ -116,34 +106,60 @@
       promise
         .then((res) => {
           const shops = res.data || []
-          count.textContent = `共 ${shops.length} 家`
+          const total = res.total || shops.length
+          count.textContent = `共 ${total} 家`
+          totalPages = Math.max(1, Math.ceil(total / 6))
 
           if (!shops.length) {
-            container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><p>暂无商家信息</p></div>`
+            container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('inbox')}</div><p>暂无商家信息</p></div>`
+            renderPagination()
             return
           }
 
           container.innerHTML = shops.map((shop) => `
             <div class="shop-card" onclick="window.location.href='shop-detail.html?id=${shop.id}'">
-              <img class="shop-img" src="${shop.images ? shop.images.split(',')[0] : 'https://via.placeholder.com/300x160?text=No+Image'}" 
+              <img class="shop-img" src="${shop.images ? shop.images.split(',')[0] : 'https://via.placeholder.com/300x160?text=No+Image'}"
                    alt="${shop.name}" onerror="this.src='https://via.placeholder.com/300x160?text=No+Image'">
               <div class="shop-info">
                 <div class="shop-name">${shop.name}</div>
                 <div class="shop-meta">
-                  <span class="shop-score">★ ${shop.score || '5.0'}</span>
+                  <span class="shop-score">${icon('star')} ${shop.score ? (shop.score / 10).toFixed(1) : '5.0'}</span>
                   <span>|</span>
-                  <span>${shop.area || ''}</span>
+                  <span>${shop.area || '未知区域'}</span>
                 </div>
-                <div class="shop-meta" style="margin-top:4px;">
-                  <span>${shop.address || ''}</span>
+                <div class="shop-meta" style="margin-top:6px;">
+                  <span>${icon('pin')} ${shop.address || '地址待补充'}</span>
                 </div>
               </div>
             </div>
           `).join('')
+          renderPagination()
         })
         .catch((err) => {
-          container.innerHTML = `<div class="empty-state"><div class="empty-icon">😵</div><p>${err.message}</p></div>`
+          container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('alert')}</div><p>${err.message}</p></div>`
+          renderPagination()
         })
+    }
+
+    function renderPagination() {
+      const container = document.getElementById('pagination')
+      if (totalPages <= 1) {
+        container.innerHTML = ''
+        return
+      }
+      let html = `<button class="btn btn-outline btn-sm" ${currentPage === 1 ? 'disabled' : ''} onclick="goPage(${currentPage - 1})">上一页</button>`
+      for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="btn ${i === currentPage ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="goPage(${i})">${i}</button>`
+      }
+      html += `<button class="btn btn-outline btn-sm" ${currentPage === totalPages ? 'disabled' : ''} onclick="goPage(${currentPage + 1})">下一页</button>`
+      container.innerHTML = html
+    }
+
+    function goPage(page) {
+      if (page < 1 || page > totalPages) return
+      currentPage = page
+      loadShops()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     function loadHotBlogs() {
@@ -158,7 +174,7 @@
           container.innerHTML = blogs.slice(0, 3).map((blog) => `
             <div class="blog-card" style="cursor:pointer;" onclick="window.location.href='blog-detail.html?id=${blog.id}'">
               <div class="blog-header">
-                <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" 
+                <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}"
                      alt="" onerror="this.src='https://via.placeholder.com/40x40'">
                 <div>
                   <div class="blog-user">${blog.name || '匿名用户'}</div>
@@ -168,7 +184,7 @@
               <div class="blog-title">${blog.title}</div>
               <div class="blog-content">${blog.content}</div>
               <div class="blog-actions">
-                <span class="blog-action ${blog.isLike ? 'liked' : ''}">❤ ${blog.liked || 0}</span>
+                <span aria-label="点赞" class="blog-action ${blog.isLike ? 'liked' : ''}">${icon('heart')} ${blog.liked || 0}</span>
               </div>
             </div>
           `).join('')
@@ -178,6 +194,12 @@
 
     function init() {
       renderHeader()
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('search')) {
+        searchKeyword = params.get('search')
+        const input = document.getElementById('searchInput')
+        if (input) input.value = searchKeyword
+      }
       loadShopTypes()
       loadShops()
       loadHotBlogs()

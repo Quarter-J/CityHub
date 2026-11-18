@@ -101,5 +101,11 @@ public class Voucher implements Serializable {
      */
     private LocalDateTime updateTime;
 
+    /**
+     * 商铺名称
+     */
+    @TableField(exist = false)
+    private String shopName;
+
 
 }

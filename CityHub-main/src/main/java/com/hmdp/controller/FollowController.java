@@ -50,4 +50,23 @@ public class FollowController {
     public Result followCommons(@PathVariable Long id){
         return followService.followCommons(id);
     }
+
+    /**
+     * 我的关注列表
+     * @return 用户列表
+     */
+    @GetMapping("/of/me")
+    public Result myFollows(){
+        return followService.queryMyFollows();
+    }
+
+    /**
+     * 粉丝列表
+     * @param id 用户id
+     * @return 用户列表
+     */
+    @GetMapping("/fans/{id}")
+    public Result fans(@PathVariable("id") Long id){
+        return followService.queryFans(id);
+    }
 }

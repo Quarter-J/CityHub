@@ -24,6 +24,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.Generated;
 import javax.annotation.Resource;
@@ -222,8 +224,17 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
         //1.先修改数据库
         updateById(shop);
-        //2.删除两级缓存
-        clientClient.invalidateTwoLevel(CACHE_SHOP_KEY, shop.getId());
+        //2.事务提交后再删除缓存，避免并发请求把未提交前的旧值重新写回
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    clientClient.invalidateTwoLevel(CACHE_SHOP_KEY, shop.getId());
+                }
+            });
+        } else {
+            clientClient.invalidateTwoLevel(CACHE_SHOP_KEY, shop.getId());
+        }
         return Result.ok();
     }
 
@@ -241,7 +252,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                         .eq("type_id", typeId)
                         .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
             }
-            return Result.ok(page.getRecords());
+            return Result.ok(page.getRecords(), page.getTotal());
         }
         //2.计算分页参数
         int from=(current-1)*SystemConstants.DEFAULT_PAGE_SIZE;

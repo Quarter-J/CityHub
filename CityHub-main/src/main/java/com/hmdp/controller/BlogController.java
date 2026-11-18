@@ -52,7 +52,7 @@ public class BlogController {
                 .eq("user_id", user.getId()).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Blog> records = page.getRecords();
-        return Result.ok(records);
+        return Result.ok(records, page.getTotal());
     }
 
     /**
@@ -90,8 +90,31 @@ public class BlogController {
 
         //获取当前页数据
         List<Blog> records = page.getRecords();
-        return Result.ok(records);
+        return Result.ok(records, page.getTotal());
     }
+
+    /**
+     * 查询当前用户点过赞的笔记
+     * @param current 页码
+     * @return 笔记列表
+     */
+    @GetMapping("/of/liked")
+    public Result queryLikedBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
+        return blogService.queryLikedBlog(current);
+    }
+
+    /**
+     * 查询商铺下的笔记
+     * @param shopId 商铺id
+     * @param current 页码
+     * @return 笔记列表
+     */
+    @GetMapping("/of/shop")
+    public Result queryBlogOfShop(@RequestParam("shopId") Long shopId,
+                                  @RequestParam(value = "current", defaultValue = "1") Integer current) {
+        return blogService.queryBlogOfShop(shopId, current);
+    }
+
     @GetMapping("/of/follow")
     public Result queryBlogOfFollow(
             @RequestParam("lastId") Long max,

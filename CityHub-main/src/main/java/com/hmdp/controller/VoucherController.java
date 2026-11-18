@@ -30,7 +30,7 @@ public class VoucherController {
      */
     @PostMapping
     public Result addVoucher(@RequestBody Voucher voucher) {
-        voucherService.addSeckillVoucher(voucher);
+        voucherService.addVoucher(voucher);
         return Result.ok(voucher.getId());
     }
 
@@ -53,5 +53,27 @@ public class VoucherController {
     @GetMapping("/list/{shopId}")
     public Result queryVoucherOfShop(@PathVariable("shopId") Long shopId) {
        return voucherService.queryVoucherOfShop(shopId);
+    }
+
+    /**
+     * 查询优惠券详情
+     * @param id 优惠券id
+     * @return 优惠券详情
+     */
+    @GetMapping("/{id}")
+    public Result queryVoucherById(@PathVariable("id") Long id) {
+        return voucherService.queryVoucherById(id);
+    }
+
+    /**
+     * 查询全部在售优惠券
+     * @param type 优惠券类型，null-全部
+     * @param current 页码
+     * @return 优惠券列表
+     */
+    @GetMapping("/all")
+    public Result queryAllVouchers(@RequestParam(value = "type", required = false) Integer type,
+                                   @RequestParam(value = "current", defaultValue = "1") Integer current) {
+        return voucherService.queryAllVouchers(type, current);
     }
 }

@@ -11,9 +11,9 @@
 
   <div class="page-container">
     <div class="tabs">
-      <span class="tab-item active" onclick="switchTab(this, 'feed')">📰 关注推送</span>
-      <span class="tab-item" onclick="switchTab(this, 'common')">🤝 共同关注</span>
-      <span class="tab-item" onclick="switchTab(this, 'following')">👤 我的关注</span>
+      <span class="tab-item active" onclick="switchTab(this, 'feed')">关注推送</span>
+      <span class="tab-item" onclick="switchTab(this, 'common')">共同关注</span>
+      <span class="tab-item" onclick="switchTab(this, 'following')">我的关注</span>
     </div>
 
     <div id="followContent">
@@ -21,11 +21,13 @@
     </div>
   </div>
 
+  <script src="js/icons.js"></script>
   <script src="js/api.js"></script>
   <script>
     let currentTab = 'feed'
     let feedLastId = null
     let feedOffset = 0
+    let feedBlogs = []
     let hasMoreFeed = true
     const commonUserId = new URLSearchParams(window.location.search).get('id')
 
@@ -41,7 +43,7 @@
       container.innerHTML = '<div class="loading">加载中</div>'
 
       if (currentTab === 'feed') {
-        loadFeed()
+        loadFeed(true)
       } else if (currentTab === 'common') {
         loadCommon()
       } else if (currentTab === 'following') {
@@ -49,120 +51,140 @@
       }
     }
 
-    function loadFeed() {
+    function loadFeed(reset) {
       const container = document.getElementById('followContent')
       if (!requireAuth()) return
+      if (reset) {
+        feedBlogs = []
+        feedLastId = null
+        feedOffset = 0
+        hasMoreFeed = true
+      }
 
       if (!hasMoreFeed) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><p>没有更多推送了</p></div>'
+        renderFeed(container, true)
         return
       }
 
-      const params = {}
-      if (feedLastId) params.lastId = feedLastId
-      if (feedOffset) params.offset = feedOffset
-
-      blogAPI.followFeed(feedLastId || Date.now(), feedOffset)
+      // 首次加载用当前时间作为游标，之后用上一页返回的 minTime
+      const lastId = feedLastId != null ? feedLastId : Date.now()
+      blogAPI.followFeed(lastId, feedOffset)
         .then((res) => {
-          const data = res.data
-          const blogs = data ? (data.records || data.list || data || []) : []
-          const minTime = data ? data.minTime : null
+          const data = res.data || {}
+          const blogs = data.list || []
+          const minTime = data.minTime != null ? data.minTime : null
 
-          if (!Array.isArray(blogs) || !blogs.length) {
+          if (!blogs.length) {
             hasMoreFeed = false
-            container.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><p>暂无关注推送<br><small>关注更多用户获取推送</small></p></div>'
+            renderFeed(container, true)
             return
           }
 
-          if (minTime) {
+          feedBlogs = feedBlogs.concat(blogs)
+
+          if (minTime != null) {
+            // 滚动分页：同一时间戳多条时累计 offset
+            if (feedLastId != null && minTime === feedLastId) {
+              feedOffset = feedOffset + (data.offset || 1)
+            } else {
+              feedOffset = data.offset || 1
+            }
             feedLastId = minTime
-            feedOffset = data.offset || 0
           } else {
             hasMoreFeed = false
           }
 
-          container.innerHTML = '<div class="blog-list">' +
-            blogs.map((blog) => {
-              const images = blog.images ? blog.images.split(',') : []
-              const imgHtml = images.length
-                ? `<div class="blog-images">${images.slice(0, 3).map((img) => `<img src="${img}" onerror="this.style.display='none'">`).join('')}</div>`
-                : ''
-
-              return `<div class="blog-card">
-                <div class="blog-header">
-                  <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
-                  <div>
-                    <div class="blog-user">${blog.name || '匿名'}</div>
-                    <div class="blog-time">${formatTime(blog.createTime)}</div>
-                  </div>
-                </div>
-                <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'" style="cursor:pointer;">${blog.title}</div>
-                <div class="blog-content">${blog.content}</div>
-                ${imgHtml}
-                <div class="blog-actions">
-                  <span class="blog-action ${blog.isLike ? 'liked' : ''}">❤ ${blog.liked || 0}</span>
-                </div>
-              </div>`
-            }).join('') + '</div>'
-
-          if (hasMoreFeed) {
-            container.innerHTML += '<div style="text-align:center;padding:16px;"><button class="btn btn-outline" onclick="loadFeed()">加载更多</button></div>'
-          }
+          renderFeed(container, false)
         })
         .catch((err) => {
           container.innerHTML = `<div class="empty-state"><p>${err.message || '加载失败'}</p></div>`
         })
     }
 
+    function renderFeed(container, ended) {
+      if (!feedBlogs.length) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('file')}</div><p>暂无关注推送<br><small>关注更多用户获取推送</small></p></div>`
+        return
+      }
+
+      let html = '<div class="blog-list">' + feedBlogs.map((blog) => {
+        const images = blog.images ? blog.images.split(',') : []
+        const imgHtml = images.length
+          ? `<div class="blog-images">${images.slice(0, 3).map((img) => `<img src="${img}" onerror="this.style.display='none'">`).join('')}</div>`
+          : ''
+
+        return `<div class="blog-card">
+          <div class="blog-header" onclick="window.location.href='user.html?id=${blog.userId}'" style="cursor:pointer;">
+            <img class="blog-avatar" src="${blog.icon || 'https://via.placeholder.com/40x40'}" alt="">
+            <div>
+              <div class="blog-user">${blog.name || '匿名'}</div>
+              <div class="blog-time">${formatTime(blog.createTime)}</div>
+            </div>
+          </div>
+          <div class="blog-title" onclick="window.location.href='blog-detail.html?id=${blog.id}'">${blog.title}</div>
+          <div class="blog-content">${blog.content}</div>
+          ${imgHtml}
+          <div class="blog-actions">
+            <span aria-label="点赞" class="blog-action ${blog.isLike ? 'liked' : ''}">${icon('heart')} ${blog.liked || 0}</span>
+          </div>
+        </div>`
+      }).join('') + '</div>'
+
+      if (hasMoreFeed && !ended) {
+        html += '<div style="text-align:center;padding:16px;"><button class="btn btn-outline" onclick="loadFeed(false)">加载更多</button></div>'
+      } else if (!hasMoreFeed) {
+        html += '<div style="text-align:center;padding:16px;color:var(--text-light);font-size:13px;">没有更多推送了</div>'
+      }
+
+      container.innerHTML = html
+    }
+
     function loadCommon() {
       const container = document.getElementById('followContent')
       if (!requireAuth()) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><p>请先登录</p></div>'
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('lock')}</div><p>请先登录</p></div>`
         return
       }
 
-      if (!commonUserId) {
-        const user = getUser()
-        const id = user ? user.id : null
-        if (id) {
-          followAPI.common(id)
-            .then((res) => renderCommonUsers(res.data || [], container))
-            .catch(() => {
-              container.innerHTML = '<div class="empty-state"><p>请指定要查看的用户</p><a href="user.html" class="btn btn-primary" style="margin-top:12px;">返回用户中心</a></div>'
-            })
-        } else {
-          container.innerHTML = '<div class="empty-state"><p>请指定要查看的用户</p></div>'
-        }
+      const id = commonUserId || (getUser() ? getUser().id : null)
+      if (!id) {
+        container.innerHTML = '<div class="empty-state"><p>请指定要查看的用户</p></div>'
         return
       }
 
-      followAPI.common(commonUserId)
-        .then((res) => renderCommonUsers(res.data || [], container))
+      followAPI.common(id)
+        .then((res) => renderUsers(res.data || [], container, '暂无共同关注'))
         .catch((err) => {
           container.innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
         })
     }
 
-    function renderCommonUsers(users, container) {
-      if (!users.length) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🤝</div><p>暂无共同关注</p></div>'
-        return
-      }
-
-      container.innerHTML = `<h3 style="margin-bottom:16px;font-size:16px;">共同关注 (${users.length}人)</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px;">
-          ${users.map((u) => `
-            <div style="text-align:center;padding:16px;background:var(--bg-white);border-radius:var(--radius);box-shadow:var(--shadow);" onclick="window.location.href='user.html?id=${u.id}'" style="cursor:pointer;">
-              <img src="${u.icon || 'https://via.placeholder.com/60x60'}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;margin-bottom:8px;">
-              <div style="font-size:14px;font-weight:500;">${u.nickName || u.name || '用户'}</div>
-            </div>
-          `).join('')}
-        </div>`
-    }
-
     function loadFollowing() {
       const container = document.getElementById('followContent')
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><p>关注用户管理</p><a href="user.html" class="btn btn-primary" style="margin-top:12px;">返回个人中心</a></div>'
+      if (!requireAuth()) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('lock')}</div><p>请先登录</p></div>`
+        return
+      }
+      followAPI.ofMe()
+        .then((res) => renderUsers(res.data || [], container, '还没有关注任何人'))
+        .catch((err) => {
+          container.innerHTML = `<div class="empty-state"><p>${err.message}</p></div>`
+        })
+    }
+
+    function renderUsers(users, container, emptyText) {
+      if (!users.length) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${icon('users')}</div><p>${emptyText}</p></div>`
+        return
+      }
+      container.innerHTML = `<div class="user-grid">
+        ${users.map((u) => `
+          <div class="user-cell" onclick="window.location.href='user.html?id=${u.id}'">
+            <img src="${u.icon || 'https://via.placeholder.com/60x60'}">
+            <div class="user-cell-name">${u.nickName || '用户'}</div>
+          </div>
+        `).join('')}
+      </div>`
     }
 
     function init() {

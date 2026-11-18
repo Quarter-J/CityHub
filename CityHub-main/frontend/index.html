@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CityHub - 本地生活服务平台</title>
+  <script>
+    // 尽早应用主题，避免闪烁（与 stores/theme.ts 的初始化逻辑保持一致）
+    ;(function () {
+      var saved = localStorage.getItem('cityhub_theme')
+      var theme = saved === 'light' || saved === 'dark'
+        ? saved
+        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      document.documentElement.setAttribute('data-theme', theme)
+    })()
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

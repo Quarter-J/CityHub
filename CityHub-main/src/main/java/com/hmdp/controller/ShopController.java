@@ -92,8 +92,8 @@ public class ShopController {
         // 根据类型分页查询
         Page<Shop> page = shopService.query()
                 .like(StrUtil.isNotBlank(name), "name", name)
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
         // 返回数据
-        return Result.ok(page.getRecords());
+        return Result.ok(page.getRecords(), page.getTotal());
     }
 }

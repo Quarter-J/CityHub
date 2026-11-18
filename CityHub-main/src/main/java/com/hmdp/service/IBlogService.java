@@ -25,4 +25,19 @@ public interface IBlogService extends IService<Blog> {
     Result saveBlog(Blog blog);
 
     Result quertBlogOfFollow(Long max, Integer offset);
+
+    /**
+     * 分页查询当前用户点过赞的笔记
+     * @param current 页码
+     * @return 笔记列表
+     */
+    Result queryLikedBlog(Integer current);
+
+    /**
+     * 分页查询商铺下的笔记
+     * @param shopId 商铺id
+     * @param current 页码
+     * @return 笔记列表
+     */
+    Result queryBlogOfShop(Long shopId, Integer current);
 }

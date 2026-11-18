@@ -39,7 +39,9 @@
 
 ## 项目简介
 
-**CityHub** 是一个参考"大众点评"设计的本地生活服务平台，覆盖了从商铺浏览、优惠券秒杀到社交分享的完整业务链路。项目以 **高并发秒杀** 为核心场景，通过引入 Redis 缓存、消息队列、分布式锁等手段，将系统从"能用"优化到"抗压"。
+**CityHub** 是一个参考"大众点评"设计的本地生活服务平台，覆盖了从商铺浏览、优惠券秒杀到社交分享的完整业务链路。项目以 **高并发秒杀** 为核心场景，通过 Redis、RabbitMQ、Redisson 和 Caffeine 处理缓存与并发问题。
+
+> 实现状态以当前代码为准。文中未接入代码的限流、支付、关单、UV 等内容仅作为设计记录，不视为已实现功能。
 
 > 详细的设计取舍与踩坑复盘请参阅 [README.md](./README.md)。
 
@@ -52,7 +54,7 @@
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
 | 发送验证码 | `POST` | `/user/code` | 输入手机号，发送验证码（有效期2分钟） |
-| 用户登录 | `POST` | `/user/login` | 支持验证码/密码登录，返回 token |
+| 用户登录 | `POST` | `/user/login` | 手机号 + 验证码登录，返回 Redis 中的不透明 token |
 | 用户登出 | `POST` | `/user/logout` | 退出登录，清除登录态 |
 | 获取当前用户 | `GET` | `/user/me` | 获取当前登录用户基本信息 |
 | 用户详细资料 | `GET` | `/user/info/{id}` | 获取用户详细信息（头像、签名等） |
@@ -62,7 +64,7 @@
 
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
-| 查询商铺详情 | `GET` | `/shop/{id}` | 查询商铺信息（两级缓存：Caffeine → Redis → DB，逻辑过期防击穿） |
+| 查询商铺详情 | `GET` | `/shop/{id}` | 两级缓存 + Redisson 冷 Key 重建锁，缓存空值防穿透 |
 | 新增商铺 | `POST` | `/shop` | 添加新商铺 |
 | 更新商铺 | `PUT` | `/shop` | 修改商铺信息，并更新缓存 |
 | 按类型查询 | `GET` | `/shop/of/type` | 按类型分页查询，支持 GEO 距离排序 |
@@ -88,7 +90,7 @@
 |------|---------|---------|------|
 | 秒杀下单 | `POST` | `/voucher-order/seckill/{id}` | **核心功能**：高并发秒杀，异步处理订单 |
 
-> **秒杀流程**：Redis + Lua 判断资格（库存 & 一人一单）→ 发送 MQ 消息 → 消费者异步写库
+> **秒杀流程**：Redis + Lua 判断资格（库存 & 一人一单）→ 同步等待 MQ publisher confirm → 消费者事务内扣库存并写订单；消息失败会原子补偿 Redis，定时任务会重新投递未落库订单。
 
 ### 六、博客笔记模块
 
@@ -101,7 +103,7 @@
 | 笔记详情 | `GET` | `/blog/{id}` | 查询单条笔记完整内容 |
 | 点赞用户列表 | `GET` | `/blog/likes/{id}` | 查看某笔记的点赞用户列表（按时间排序） |
 | 用户笔记列表 | `GET` | `/blog/of/user` | 查询指定用户发布的所有笔记 |
-| **关注推送** | `GET` | `/blog/of/follow` | 滚动查询关注用户的最新笔记（基于 Redis 收件箱） |
+| **关注推送** | `GET` | `/blog/of/follow` | 滚动查询关注用户的最新笔记（Redis 收件箱 + 数据库 outbox 补偿） |
 
 ### 七、关注模块
 
@@ -122,9 +124,9 @@
 | **基础框架** | Spring Boot 2.3.12 | 应用主框架 |
 | **ORM** | MyBatis-Plus 3.4 | 数据持久化，简化 CRUD |
 | **关系型数据库** | MySQL 8.0 | 核心业务数据存储 |
-| **分布式缓存** | Redis 7.0 | 高性能缓存、分布式锁、限流 |
+| **分布式缓存** | Redis 7.0 | 热点缓存、秒杀预占、临时登录态 |
 | **本地缓存** | Caffeine 2.9.3 | 进程内 L1 缓存，减少 Redis 压力 |
-| **分布式锁** | Redisson 3.13 | 分布式锁实现 |
+| **分布式锁** | Redisson 3.13 | 缓存冷 Key 重建和分类缓存互斥 |
 | **消息队列** | RabbitMQ | 秒杀异步下单，削峰填谷 |
 | **工具库** | Hutool 5.7 | 通用工具类 |
 | **连接池** | Lettuce + Commons-Pool2 | Redis 连接管理 |
@@ -139,8 +141,8 @@
 ```
 
 - **L1 本地缓存**：Caffeine 缓存热点数据，纳秒级响应，容量上限 1000 条，写入后 5 分钟过期
-- **L2 分布式缓存**：Redis 缓存，逻辑过期方案防击穿
-- **缓存击穿**：采用**逻辑过期方案**（不设物理 TTL，后台异步刷新），优先保证可用性
+- **L2 分布式缓存**：Redis 使用物理 TTL；空值缓存 2 分钟
+- **缓存击穿**：当前商铺查询使用 Redisson 分布式锁 + 双重检查，逻辑过期重建能力保留在工具类中
 - **缓存穿透**：采用**缓存空值方案**，Redis 和 Caffeine 均回填空值标记，搭配短 TTL 避免内存浪费
 - **缓存更新**：数据变更时通过 `invalidateTwoLevel` 同步清除 L1 和 L2 缓存，缩短不一致窗口
 
@@ -159,13 +161,12 @@
 2. 校验通过 → 发送 RabbitMQ 消息 → 立即返回"排队中"
 3. 消费者异步写入 MySQL 订单表
 
-**幂等保障**：订单 ID 为主键，重复消费写入失败，业务不受影响
+**幂等与补偿**：订单 ID 为主键，`(user_id, voucher_id)` 唯一索引保证一人一单；Redis 保存用户到订单号的预占映射，发布失败时原子回滚库存和资格，定时任务根据 pending Hash 重新投递。
 
-#### 🔒 分布式锁 & 限流
+#### 🔒 分布式锁
 
-- **Redisson 分布式锁**：保障集群环境下资源的互斥访问
-- **滑动窗口限流**：基于 Redis ZSet + Lua 实现，支持用户/IP 维度的精准限流
-- **令牌桶限流**：针对 API 调用场景，允许合理突发流量
+- **Redisson 分布式锁**：用于缓存冷 Key 重建和分类缓存初始化
+- **限流**：当前代码尚未实现注解式滑动窗口或令牌桶限流
 
 ### Redis 特性应用
 
@@ -176,7 +177,6 @@
 | 共同关注 | Set | SINTER（交集） |
 | 附近商铺 | GEO | GEORADIUS / GEOSEARCH |
 | 用户签到 | BitMap | SETBIT / GETBIT |
-| UV 统计 | HyperLogLog | PFADD / PFCOUNT |
 | 秒杀库存 | String + Lua | EVAL / DECR |
 | 关注收件箱 | ZSet | ZREVRANGEBYSCORE |
 | 全局 ID 生成器 | String | INCR（按天自增） |
@@ -196,7 +196,9 @@
 | `tb_voucher_order` | 优惠券订单表 | id, user_id, voucher_id, status, create_time |
 | `tb_blog` | 笔记表 | id, shop_id, user_id, title, content, liked |
 | `tb_blog_comments` | 笔记评论表 | id, user_id, blog_id, content, parent_id |
+| `tb_blog_like` | 笔记点赞关系表 | id, blog_id, user_id, create_time |
 | `tb_follow` | 关注关系表 | id, user_id, follow_user_id, create_time |
+| `tb_feed_outbox` | Feed 分发补偿表 | blog_id, create_time |
 
 ---
 
@@ -204,7 +206,7 @@
 
 ### 环境要求
 
-- JDK 1.8+
+- JDK 8 或 JDK 17（当前工具链已用 JDK 17 验证；旧版 Lombok 与 JDK 21 不兼容）
 - MySQL 8.0+
 - Redis 7.0+
 - RabbitMQ 3.x
@@ -212,11 +214,17 @@
 ### 启动步骤
 
 ```bash
-# 1. 导入数据库
+# 1. 全量初始化数据库
 mysql -u root -p < src/main/resources/db/hmdp.sql
 
-# 2. 修改配置（数据库、Redis、RabbitMQ）
-src/main/resources/application.yaml
+# 或者对已有数据库执行增量迁移
+mysql -u root -p dingping < src/main/resources/db/hmdp_hardening.sql
+
+# 2. 通过环境变量配置连接信息
+export MYSQL_USERNAME=root
+export MYSQL_PASSWORD=your_password
+export RABBITMQ_USERNAME=guest
+export RABBITMQ_PASSWORD=guest
 
 # 3. 启动项目
 mvn spring-boot:run
