@@ -35,6 +35,7 @@
   - [Redis 特性应用](#redis-特性应用)
 - [数据库设计](#数据库设计)
 - [快速启动](#快速启动)
+- [性能验证](#性能验证)
 
 ---
 
@@ -249,6 +250,15 @@ mvn spring-boot:run
 # 4. 访问服务
 http://localhost:8081
 ```
+
+---
+
+## 性能验证
+
+- `RedisIdWorkerConcurrencyTest` 使用 16 个线程生成 8000 个 ID，并断言无重复。
+- `loadtest/jmeter/seckill.jmx` 提供 1000 用户并发秒杀计划。
+- 压测 token 由 `VoucherOrderControllerTest.login` 生成到 `target/loadtest/tokens.csv`。
+- 运行方式见 `loadtest/README.md`；仓库不固化与环境相关的 QPS 数字。
 
 ---
 

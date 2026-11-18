@@ -1,0 +1,3 @@
+token,ip
+replace_with_jwt_1,10.20.0.1
+replace_with_jwt_2,10.20.0.2

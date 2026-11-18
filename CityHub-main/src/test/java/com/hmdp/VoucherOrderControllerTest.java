@@ -7,28 +7,30 @@ import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.User;
 import com.hmdp.service.IUserService;
-import lombok.Builder;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 
 import javax.annotation.Resource;
 import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
+
+import static com.hmdp.utils.RedisConstants.LOGIN_CODE_KEY;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -43,7 +45,8 @@ class VoucherOrderControllerTest {
     @Resource
     private ObjectMapper mapper;
 
-
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     @Test
     @SneakyThrows
@@ -67,7 +70,8 @@ class VoucherOrderControllerTest {
                             .andReturn().getResponse().getContentAsString();
                     Result result = mapper.readerFor(Result.class).readValue(codeJson);
                     Assert.isTrue(result.getSuccess(), String.format("获取“%s”手机号的验证码失败", phone));
-                    String code = result.getData().toString();
+                    String code = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
+                    Assert.notNull(code, String.format("手机号“%s”的验证码未写入 Redis", phone));
                     LoginFormDTO formDTO = LoginFormDTO.builder().code(code).phone(phone).build();
                     String json = mapper.writeValueAsString(formDTO);
                     // token
@@ -82,29 +86,30 @@ class VoucherOrderControllerTest {
                     countDownLatch.countDown();
                 } catch (Exception e) {
                     e.printStackTrace();
+                } finally {
+                    countDownLatch.countDown();
                 }
             });
         });
         countDownLatch.await();
-        executorService.shutdown();
+        executorService.shutdownNow();
         Assert.isTrue(tokenList.size() == phoneList.size());
-        writeToTxt(tokenList, "\\tokens.txt");
+        writeTokensCsv(tokenList);
         System.out.println("写入完成！");
     }
 
-    private static void writeToTxt(List<String> list, String suffixPath) throws Exception {
-        // 1. 创建文件
-        File file = new File(System.getProperty("user.dir") + "\\src\\main\\resources" + suffixPath);
-        if (!file.exists()) {
-            file.createNewFile();
+    private static void writeTokensCsv(List<String> tokens) throws Exception {
+        Path output = Paths.get(System.getProperty("user.dir"), "target", "loadtest", "tokens.csv");
+        Files.createDirectories(output.getParent());
+        try (BufferedWriter writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
+            writer.write("token,ip");
+            writer.newLine();
+            for (int i = 0; i < tokens.size(); i++) {
+                int second = (i / 256) % 256;
+                int third = i % 256;
+                writer.write(tokens.get(i) + ",10.20." + second + "." + third);
+                writer.newLine();
+            }
         }
-        // 2. 输出
-        BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8));
-        for (String content : list) {
-            bw.write(content);
-            bw.newLine();
-        }
-        bw.close();
-        System.out.println("写入完成！");
     }
 }
