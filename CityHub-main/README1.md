@@ -89,7 +89,7 @@
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
 | 秒杀下单 | `POST` | `/voucher-order/seckill/{id}` | **核心功能**：高并发秒杀，异步处理订单 |
-| 支付订单 | `POST` | `/voucher-order/pay/{id}` | 模拟支付回调，使用 `WHERE status=未支付` 条件更新 |
+| 支付订单 | `POST` | `/voucher-order/pay/{id}` | 模拟支付回调，使用条件更新；订单尚未落库时可携带 `voucherId` 补建已支付订单 |
 | 查询订单 | `GET` | `/voucher-order/{id}` | 查询自己的订单状态 |
 
 > **秒杀流程**：Redis + Lua 判断资格（库存 & 一人一单）→ 同步等待 MQ publisher confirm → 消费者按用户获取 Redisson 锁 → 事务内扣库存并写订单；消息失败会原子补偿 Redis，定时任务会重新投递未落库订单。
@@ -172,7 +172,7 @@
 
 **最终方案流程：**
 1. Lua 脚本原子执行：**判断库存** → **校验一人一单** → **扣减库存**
-2. 校验通过 → 发送 RabbitMQ 消息 → 立即返回"排队中"
+2. 校验通过 → 发送 RabbitMQ 消息 → 等待 broker confirm 后返回订单号
 3. 消费者异步写入 MySQL 订单表
 
 **幂等与补偿**：订单 ID 为主键，`(user_id, voucher_id)` 唯一索引保证一人一单；Redis 保存用户到订单号的预占映射，发布失败时原子回滚库存和资格，定时任务根据 pending Hash 重新投递。
@@ -186,7 +186,7 @@
 
 | 业务场景 | Redis 数据结构 | 核心命令 |
 |---------|---------------|---------|
-| 登录态 | String | SET / GET / EXPIRE |
+| 用户登录态 | JWT + Hash | JWT 签名校验 / HSET / EXPIRE |
 | 点赞排行榜 | ZSet | ZADD / ZSCORE / ZRANGE |
 | 共同关注 | Set | SINTER（交集） |
 | 附近商铺 | GEO | GEORADIUS / GEOSEARCH |

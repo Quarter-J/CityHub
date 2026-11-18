@@ -35,7 +35,7 @@ class VoucherOrderStateTest {
         VoucherOrderServiceImpl service = service(mapper);
         loginAs(7L);
 
-        Result result = service.payOrder(100L, 1);
+        Result result = service.payOrder(100L, 1, null);
 
         assertTrue(result.getSuccess());
     }
@@ -51,7 +51,7 @@ class VoucherOrderStateTest {
         VoucherOrderServiceImpl service = service(mapper);
         loginAs(7L);
 
-        Result result = service.payOrder(100L, 1);
+        Result result = service.payOrder(100L, 1, null);
 
         assertFalse(result.getSuccess());
         assertTrue(result.getErrorMsg().contains("退款"));

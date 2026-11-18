@@ -12,7 +12,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
 
     void markOrderProcessed(Long voucherId, Long userId, Long orderId);
 
-    Result payOrder(Long orderId, Integer payType);
+    Result payOrder(Long orderId, Integer payType, Long voucherId);
 
     Result queryOrder(Long orderId);
 

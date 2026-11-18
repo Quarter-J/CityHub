@@ -35,8 +35,9 @@ public class VoucherOrderController {
 
     @PostMapping("/pay/{id}")
     public Result payOrder(@PathVariable("id") Long orderId,
-                           @RequestParam(value = "payType", defaultValue = "1") Integer payType) {
-        return voucherOrderService.payOrder(orderId, payType);
+                           @RequestParam(value = "payType", defaultValue = "1") Integer payType,
+                           @RequestParam(value = "voucherId", required = false) Long voucherId) {
+        return voucherOrderService.payOrder(orderId, payType, voucherId);
     }
 
     @GetMapping("/{id}")

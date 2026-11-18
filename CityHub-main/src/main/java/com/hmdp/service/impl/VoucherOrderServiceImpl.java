@@ -205,7 +205,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     @Override
-    public Result payOrder(Long orderId, Integer payType) {
+    @Transactional
+    public Result payOrder(Long orderId, Integer payType, Long voucherId) {
         UserDTO user = UserHolder.getUser();
         if (user == null) {
             return Result.fail("请先登录");
@@ -221,7 +222,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
 
         VoucherOrder current = voucherOrderMapper.selectById(orderId);
-        if (current == null || !user.getId().equals(current.getUserId())) {
+        if (current == null) {
+            return recoverPaidOrder(orderId, user.getId(), payType, voucherId, payTime);
+        }
+        if (!user.getId().equals(current.getUserId())) {
             return Result.fail("订单不存在");
         }
         if (current.getStatus() != null && current.getStatus() == VoucherOrderStatus.PAID) {
@@ -231,6 +235,38 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("订单已关闭，支付回调需要进入退款流程");
         }
         return Result.fail("订单状态已变化，支付未生效");
+    }
+
+    private Result recoverPaidOrder(Long orderId, Long userId, Integer payType,
+                                    Long voucherId, LocalDateTime payTime) {
+        if (voucherId == null) {
+            return Result.fail("订单尚未落库，请携带优惠券 ID 重试支付回调");
+        }
+        String orderKey = RedisConstants.SECKILL_ORDER_KEY + voucherId;
+        Object reservedOrderId = stringRedisTemplate.opsForHash().get(orderKey, userId.toString());
+        if (!String.valueOf(orderId).equals(String.valueOf(reservedOrderId))) {
+            return Result.fail("订单不存在或支付回调与 Redis 预占不匹配");
+        }
+
+        boolean stockUpdated = seckillVoucherService.update()
+                .setSql("stock = stock - 1")
+                .eq("voucher_id", voucherId)
+                .gt("stock", 0)
+                .update();
+        if (!stockUpdated) {
+            throw new IllegalStateException("数据库秒杀库存不足，无法补建支付订单 " + orderId);
+        }
+
+        VoucherOrder order = new VoucherOrder()
+                .setId(orderId)
+                .setUserId(userId)
+                .setVoucherId(voucherId)
+                .setPayType(payType)
+                .setStatus(VoucherOrderStatus.PAID)
+                .setPayTime(payTime);
+        save(order);
+        afterCommit(() -> markOrderProcessed(voucherId, userId, orderId));
+        return Result.ok();
     }
 
     @Override
