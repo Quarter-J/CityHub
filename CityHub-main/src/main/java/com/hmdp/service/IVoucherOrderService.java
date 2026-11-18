@@ -11,4 +11,10 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     void createVoucherOrder(VoucherOrder voucherOrder);
 
     void markOrderProcessed(Long voucherId, Long userId, Long orderId);
+
+    Result payOrder(Long orderId, Integer payType, Long voucherId);
+
+    Result queryOrder(Long orderId);
+
+    boolean closeExpiredOrder(Long orderId);
 }

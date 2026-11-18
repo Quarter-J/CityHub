@@ -36,6 +36,7 @@ public class LoginInterceptor implements HandlerInterceptor {
                 || path.startsWith("/shop/")
                 || "/shop-type/list".equals(path)
                 || path.startsWith("/voucher/")
+                || path.startsWith("/uv/")
                 || "/blog/hot".equals(path)
                 || path.matches("/blog/\\d+")
                 || path.matches("/blog/likes/\\d+")

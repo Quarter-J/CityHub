@@ -1,6 +1,7 @@
 package com.hmdp.config;
 
 import com.hmdp.dto.Result;
+import com.hmdp.exception.RateLimitException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,6 +19,11 @@ public class WebExceptionAdvice {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public Result handleIllegalArgument(IllegalArgumentException e) {
+        return Result.fail(e.getMessage());
+    }
+
+    @ExceptionHandler(RateLimitException.class)
+    public Result handleRateLimit(RateLimitException e) {
         return Result.fail(e.getMessage());
     }
 

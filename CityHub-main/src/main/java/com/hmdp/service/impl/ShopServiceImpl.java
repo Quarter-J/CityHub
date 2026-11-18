@@ -58,7 +58,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Override
     public Result queryById(Long id){
         Shop shop = clientClient
-                .queryTwoLevel(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+                .queryTwoLevelWithLogicalExpire(
+                        CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
         if(shop==null){
             return Result.fail("店铺不存在！");
         }

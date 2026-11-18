@@ -182,12 +182,23 @@ public class CacheClient {
         // 2. 查 L2 Redis
         String json = stringRedisTemplate.opsForValue().get(key);
         if (StrUtil.isBlank(json)) {
-            return null;
+            if (json != null) {
+                caffeineCache.put(key, "");
+                return null;
+            }
+            return rebuildLogicalMiss(key, id, type, dbFallback, time, unit);
         }
 
         // 3. 反序列化逻辑过期数据
-        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-        R result = JSONUtil.toBean((JSONObject) redisData.getData(), type);
+        RedisData redisData;
+        R result;
+        try {
+            redisData = JSONUtil.toBean(json, RedisData.class);
+            result = JSONUtil.toBean((JSONObject) redisData.getData(), type);
+        } catch (RuntimeException e) {
+            stringRedisTemplate.delete(key);
+            return rebuildLogicalMiss(key, id, type, dbFallback, time, unit);
+        }
         LocalDateTime expireTime = redisData.getExpireTime();
 
         // 回填 L1（用剩余 TTL 时间）
@@ -206,6 +217,52 @@ public class CacheClient {
             }
         });
         return result;
+    }
+
+    private <R, ID> R rebuildLogicalMiss(String key, ID id, Class<R> type,
+                                          Function<ID, R> dbFallback, Long time, TimeUnit unit) {
+        RLock lock = redissonClient.getLock("lock:cache:logical-miss:" + key);
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(2, 10, TimeUnit.SECONDS);
+            if (!locked) {
+                return dbFallback.apply(id);
+            }
+
+            Object localValue = caffeineCache.getIfPresent(key);
+            if (localValue != null) {
+                return "".equals(localValue) ? null : type.cast(localValue);
+            }
+            String current = stringRedisTemplate.opsForValue().get(key);
+            if (StrUtil.isNotBlank(current)) {
+                RedisData currentData = JSONUtil.toBean(current, RedisData.class);
+                R currentValue = JSONUtil.toBean((JSONObject) currentData.getData(), type);
+                caffeineCache.put(key, currentValue);
+                return currentValue;
+            }
+            if (current != null) {
+                caffeineCache.put(key, "");
+                return null;
+            }
+
+            R value = dbFallback.apply(id);
+            if (value == null) {
+                stringRedisTemplate.opsForValue()
+                        .set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+                caffeineCache.put(key, "");
+                return null;
+            }
+            setWithLogicalExpire(key, value, time, unit);
+            caffeineCache.put(key, value);
+            return value;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return dbFallback.apply(id);
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 
     /**
