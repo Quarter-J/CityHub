@@ -12,7 +12,7 @@
 
 <br/>
 
-**CityHub** 是一个类“大众点评”的本地生活服务平台。本文用于记录设计取舍；其中“UV”章节当前仍未实现。
+**CityHub** 是一个类“大众点评”的本地生活服务平台。本文记录项目中的设计取舍、并发问题和实现方式。
 
 
 在模拟 **“秒杀优惠券”** 的高并发场景时，我通过JMeter 压测，发现了传统单体架构的诸多瓶颈：数据库死锁、超卖、页面响应慢等。
@@ -271,6 +271,8 @@
 * 用户签到 (Redis BitMap)
     * *需求*：记录用户一年的签到，极其节省空间。
     * *实现*：1 个 bit 代表一天。`SETBIT key offset 1`。
-* UV 统计 (HyperLogLog，当前未实现)
+* UV 统计 (HyperLogLog)
     * *需求*：统计网站即使百万级访问量，误差允许极小。
     * *实现*：概率算法，占用内存极小（12KB）。命令：`PFADD`, `PFCOUNT`。
+
+**当前实现**：`UvStatisticsInterceptor` 对每个请求按 JWT 用户 ID 记录，未登录时按 IP 记录；`UvStatisticsService` 使用 `PFADD` 写入每日场景 key，并设置两天 TTL；`GET /uv/{scene}/today` 使用 `PFCOUNT` 查询当日近似独立访客数。

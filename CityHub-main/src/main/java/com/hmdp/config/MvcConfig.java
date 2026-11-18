@@ -2,6 +2,8 @@ package com.hmdp.config;
 
 import com.hmdp.interceptor.LoginInterceptor;
 import com.hmdp.interceptor.RefreshTokenInterceptor;
+import com.hmdp.interceptor.UvStatisticsInterceptor;
+import com.hmdp.service.UvStatisticsService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.JwtTokenService;
 import org.springframework.context.annotation.Configuration;
@@ -18,11 +20,15 @@ public class MvcConfig implements WebMvcConfigurer {
     private StringRedisTemplate stringRedisTemplate;
     @Resource
     private JwtTokenService jwtTokenService;
+    @Resource
+    private UvStatisticsService uvStatisticsService;
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         //登录拦截器
         registry.addInterceptor(new LoginInterceptor())
                 .addPathPatterns("/**").order(1);
+        registry.addInterceptor(new UvStatisticsInterceptor(uvStatisticsService))
+                .addPathPatterns("/**").order(2);
         //token刷新的拦截器
         registry.addInterceptor(new RefreshTokenInterceptor(stringRedisTemplate, jwtTokenService))
                 .addPathPatterns("/**").order(0);
