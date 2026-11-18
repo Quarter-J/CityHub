@@ -49,3 +49,5 @@
     jwt:
       secret: ${JWT_SECRET:cityhub-development-secret-change-me-2026}
       ttl-minutes: ${JWT_TTL_MINUTES:30}
+  order:
+    timeout-minutes: ${ORDER_TIMEOUT_MINUTES:15}

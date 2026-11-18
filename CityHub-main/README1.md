@@ -41,7 +41,7 @@
 
 **CityHub** 是一个参考"大众点评"设计的本地生活服务平台，覆盖了从商铺浏览、优惠券秒杀到社交分享的完整业务链路。项目以 **高并发秒杀** 为核心场景，通过 JWT、Redis、RabbitMQ、Redisson 和 Caffeine 处理认证、缓存与并发问题。
 
-> 实现状态以当前代码为准。文中未接入代码的支付、关单、UV 等内容仅作为设计记录，不视为已实现功能。
+> 实现状态以当前代码为准。文中未接入代码的 UV 内容仅作为设计记录，不视为已实现功能。
 
 > 详细的设计取舍与踩坑复盘请参阅 [README.md](./README.md)。
 
@@ -89,12 +89,16 @@
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
 | 秒杀下单 | `POST` | `/voucher-order/seckill/{id}` | **核心功能**：高并发秒杀，异步处理订单 |
+| 支付订单 | `POST` | `/voucher-order/pay/{id}` | 模拟支付回调，使用 `WHERE status=未支付` 条件更新 |
+| 查询订单 | `GET` | `/voucher-order/{id}` | 查询自己的订单状态 |
 
 > **秒杀流程**：Redis + Lua 判断资格（库存 & 一人一单）→ 同步等待 MQ publisher confirm → 消费者按用户获取 Redisson 锁 → 事务内扣库存并写订单；消息失败会原子补偿 Redis，定时任务会重新投递未落库订单。
 
 **失败处理**：正常队列最多重试 3 次，仍失败则拒绝并路由到死信队列；死信消费者最终失败时保留 `seckill:pending:v2:{voucherId}`，由每分钟运行一次的对账任务重新投递。正常队列不再设置 10 秒消息 TTL，避免把正常削峰积压误判为死信。
 
 **接口限流**：秒杀接口使用 Redis ZSet 滑动窗口，默认按 IP 每 10 秒最多 5 次请求；切面支持全局、用户、IP 三种维度。
+
+**超时关单**：每分钟扫描一次超过 15 分钟仍未支付的订单，通过条件更新关闭；只有关单更新成功才释放 MySQL 和 Redis 库存。支付和关单并发时最多一个条件更新成功。
 
 ### 六、博客笔记模块
 
@@ -230,6 +234,7 @@ export MYSQL_PASSWORD=your_password
 export RABBITMQ_USERNAME=guest
 export RABBITMQ_PASSWORD=guest
 export JWT_SECRET=replace_with_a_long_random_secret
+export ORDER_TIMEOUT_MINUTES=15
 
 # 3. 启动项目
 mvn spring-boot:run

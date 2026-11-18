@@ -13,6 +13,7 @@ import com.hmdp.service.IVoucherService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import com.hmdp.utils.VoucherOrderStatus;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -20,6 +21,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.beans.factory.annotation.Value;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -47,14 +51,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private SeckillOrderProducer orderProducer;
 
+    @Resource
+    private VoucherOrderMapper voucherOrderMapper;
+
+    @Value("${order.timeout-minutes:15}")
+    private long orderTimeoutMinutes;
+
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
     private static final DefaultRedisScript<Long> COMPENSATE_SCRIPT;
     private static final DefaultRedisScript<Long> MARK_PROCESSED_SCRIPT;
+    private static final DefaultRedisScript<Long> RELEASE_ORDER_SCRIPT;
 
     static {
         SECKILL_SCRIPT = loadScript("seckill.lua");
         COMPENSATE_SCRIPT = loadScript("seckill-compensate.lua");
         MARK_PROCESSED_SCRIPT = loadScript("seckill-mark-processed.lua");
+        RELEASE_ORDER_SCRIPT = loadScript("release-order.lua");
     }
 
     private static DefaultRedisScript<Long> loadScript(String path) {
@@ -190,5 +202,102 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 userId.toString(),
                 orderId.toString()
         );
+    }
+
+    @Override
+    public Result payOrder(Long orderId, Integer payType) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
+            return Result.fail("请先登录");
+        }
+        if (payType == null || payType < 1 || payType > 3) {
+            return Result.fail("支付方式不合法");
+        }
+
+        LocalDateTime payTime = LocalDateTime.now();
+        int updated = voucherOrderMapper.markPaid(orderId, user.getId(), payType, payTime);
+        if (updated > 0) {
+            return Result.ok();
+        }
+
+        VoucherOrder current = voucherOrderMapper.selectById(orderId);
+        if (current == null || !user.getId().equals(current.getUserId())) {
+            return Result.fail("订单不存在");
+        }
+        if (current.getStatus() != null && current.getStatus() == VoucherOrderStatus.PAID) {
+            return Result.ok();
+        }
+        if (current.getStatus() != null && current.getStatus() == VoucherOrderStatus.CANCELLED) {
+            return Result.fail("订单已关闭，支付回调需要进入退款流程");
+        }
+        return Result.fail("订单状态已变化，支付未生效");
+    }
+
+    @Override
+    public Result queryOrder(Long orderId) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
+            return Result.fail("请先登录");
+        }
+        VoucherOrder order = voucherOrderMapper.selectById(orderId);
+        if (order == null || !user.getId().equals(order.getUserId())) {
+            return Result.fail("订单不存在");
+        }
+        return Result.ok(order);
+    }
+
+    @Override
+    @Transactional
+    public boolean closeExpiredOrder(Long orderId) {
+        LocalDateTime deadline = LocalDateTime.now().minusMinutes(orderTimeoutMinutes);
+        int updated = voucherOrderMapper.cancelExpired(orderId, deadline);
+        if (updated == 0) {
+            return false;
+        }
+
+        VoucherOrder order = voucherOrderMapper.selectById(orderId);
+        if (order == null) {
+            throw new IllegalStateException("关闭订单后无法读取订单 " + orderId);
+        }
+        boolean stockReleased = seckillVoucherService.update()
+                .setSql("stock = stock + 1")
+                .eq("voucher_id", order.getVoucherId())
+                .update();
+        if (!stockReleased) {
+            throw new IllegalStateException("释放数据库库存失败，订单 " + orderId);
+        }
+        afterCommit(() -> releaseRedisReservation(order));
+        return true;
+    }
+
+    private void releaseRedisReservation(VoucherOrder order) {
+        String voucherId = order.getVoucherId().toString();
+        try {
+            stringRedisTemplate.execute(
+                    RELEASE_ORDER_SCRIPT,
+                    Arrays.asList(
+                            RedisConstants.SECKILL_STOCK_KEY + voucherId,
+                            RedisConstants.SECKILL_ORDER_KEY + voucherId,
+                            RedisConstants.SECKILL_PENDING_KEY + voucherId
+                    ),
+                    order.getUserId().toString(),
+                    order.getId().toString()
+            );
+        } catch (RuntimeException e) {
+            log.error("订单 {} 关闭后释放 Redis 库存失败，需要人工对账", order.getId(), e);
+        }
+    }
+
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }
