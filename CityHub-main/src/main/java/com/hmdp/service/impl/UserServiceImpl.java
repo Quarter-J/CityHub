@@ -2,7 +2,6 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
-import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -52,6 +51,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private IUserInfoService userInfoService;
+
+    @Resource
+    private JwtTokenService jwtTokenService;
     /**
      * 发送验证码
      * @param phone
@@ -116,8 +118,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             }
         }
         //7.存在 保存到redis
-        //7.1 生成个token作为登陆令牌
-        String token = UUID.randomUUID().toString(true);
+        //7.1 生成带签名和过期时间的 JWT
+        String token = jwtTokenService.createToken(user.getId());
 
         //7.2 将user对象转为Hash存储
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
@@ -127,7 +129,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         //7.3 存储
         String tokenKey=RedisConstants.LOGIN_USER_KEY+token;
         stringRedisTemplate.opsForHash().putAll(tokenKey,map);
-        stringRedisTemplate.expire(tokenKey,30,TimeUnit.MINUTES);
+        stringRedisTemplate.expire(tokenKey, jwtTokenService.getTtlMinutes(), TimeUnit.MINUTES);
         //8.返回token
         return Result.ok(token);
     }

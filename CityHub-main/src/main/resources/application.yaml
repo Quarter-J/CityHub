@@ -45,3 +45,7 @@
   logging:
     level:
       com.hmdp: debug
+  auth:
+    jwt:
+      secret: ${JWT_SECRET:cityhub-development-secret-change-me-2026}
+      ttl-minutes: ${JWT_TTL_MINUTES:30}

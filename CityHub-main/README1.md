@@ -39,7 +39,7 @@
 
 ## 项目简介
 
-**CityHub** 是一个参考"大众点评"设计的本地生活服务平台，覆盖了从商铺浏览、优惠券秒杀到社交分享的完整业务链路。项目以 **高并发秒杀** 为核心场景，通过 Redis、RabbitMQ、Redisson 和 Caffeine 处理缓存与并发问题。
+**CityHub** 是一个参考"大众点评"设计的本地生活服务平台，覆盖了从商铺浏览、优惠券秒杀到社交分享的完整业务链路。项目以 **高并发秒杀** 为核心场景，通过 JWT、Redis、RabbitMQ、Redisson 和 Caffeine 处理认证、缓存与并发问题。
 
 > 实现状态以当前代码为准。文中未接入代码的限流、支付、关单、UV 等内容仅作为设计记录，不视为已实现功能。
 
@@ -54,7 +54,7 @@
 | 功能 | 请求方式 | 接口路径 | 说明 |
 |------|---------|---------|------|
 | 发送验证码 | `POST` | `/user/code` | 输入手机号，发送验证码（有效期2分钟） |
-| 用户登录 | `POST` | `/user/login` | 手机号 + 验证码登录，返回 Redis 中的不透明 token |
+| 用户登录 | `POST` | `/user/login` | 手机号 + 验证码登录，返回带 userId、jti、签发和过期时间的 HS256 JWT |
 | 用户登出 | `POST` | `/user/logout` | 退出登录，清除登录态 |
 | 获取当前用户 | `GET` | `/user/me` | 获取当前登录用户基本信息 |
 | 用户详细资料 | `GET` | `/user/info/{id}` | 获取用户详细信息（头像、签名等） |
@@ -225,6 +225,7 @@ export MYSQL_USERNAME=root
 export MYSQL_PASSWORD=your_password
 export RABBITMQ_USERNAME=guest
 export RABBITMQ_PASSWORD=guest
+export JWT_SECRET=replace_with_a_long_random_secret
 
 # 3. 启动项目
 mvn spring-boot:run
